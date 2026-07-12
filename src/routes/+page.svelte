@@ -3,7 +3,7 @@
 	import { githubToken, githubRepo } from '$lib/stores.js';
 	import { fetchGallery, filterGallery, deleteEntry } from '$lib/gallery.js';
 	import { uploadImage } from '$lib/upload.js';
-	import { createClient, parseRepo } from '$lib/github.js';
+	import { createClient, parseRepo, putFile, getDefaultBranch } from '$lib/github.js';
 	import { renderAnnotationsSVG } from '$lib/annotations.js';
 
 	/** @type {import('$lib/gallery.js').GalleryEntry[]} */
@@ -29,6 +29,11 @@
 
 	// Detail view modal
 	let detailEntry = $state(null);
+	let editMode = $state(false);
+	let editCaptionVal = $state('');
+	let editTagsVal = $state('');
+	let editSaving = $state(false);
+	let editError = $state('');
 
 	// Delete state
 	let deletingId = $state('');
@@ -160,10 +165,71 @@
 
 	function openDetail(entry) {
 		detailEntry = entry;
+		editMode = false;
+		editCaptionVal = entry.caption || '';
+		editTagsVal = entry.tags.join(', ');
+		editError = '';
 	}
 
 	function closeDetail() {
 		detailEntry = null;
+		editMode = false;
+	}
+
+	async function handleEditSave() {
+		if (!detailEntry) return;
+		editSaving = true;
+		editError = '';
+		try {
+			const octokit = createClient($githubToken);
+			const parsed = parseRepo($githubRepo);
+			if (!octokit || !parsed) {
+				editError = 'GitHub not connected.';
+				return;
+			}
+			const { owner, repo } = parsed;
+			const branch = await getDefaultBranch(octokit, owner, repo);
+
+			// Build updated metadata
+			const newTags = editTagsVal.split(',').map((t) => t.trim()).filter(Boolean);
+			const updatedMetadata = {
+				id: detailEntry.id,
+				filename: detailEntry.filename,
+				type: detailEntry.type,
+				createdAt: detailEntry.createdAt,
+				tags: newTags,
+				caption: editCaptionVal.trim(),
+				width: detailEntry.width,
+				height: detailEntry.height,
+				annotations: detailEntry.annotations || null,
+				sourceSlideIds: detailEntry.sourceSlideIds || null
+			};
+
+			const jsonContent = JSON.stringify(updatedMetadata, null, 2);
+
+			// Read the current file SHA first
+			const { getFile } = await import('$lib/github.js');
+			const jsonPath = detailEntry.jsonPath;
+			const existing = await getFile(octokit, owner, repo, jsonPath);
+			const sha = existing ? existing.sha : undefined;
+
+			await putFile(
+				octokit, owner, repo,
+				jsonPath,
+				jsonContent,
+				`Update metadata for ${detailEntry.id}`,
+				sha
+			);
+
+			// Update local entry
+			detailEntry = { ...detailEntry, tags: newTags, caption: editCaptionVal.trim() };
+			editMode = false;
+			await loadGallery();
+		} catch (err) {
+			editError = err.message || 'Failed to save edits';
+		} finally {
+			editSaving = false;
+		}
 	}
 </script>
 
@@ -419,16 +485,36 @@
 				</div>
 			</div>
 
-			{#if detailEntry.tags.length > 0}
-				<div class="flex flex-wrap gap-1 mt-2">
-					{#each detailEntry.tags as tag}
-						<span class="badge badge-sm badge-ghost">{tag}</span>
-					{/each}
+			{#if editMode}
+				<div class="mt-3 space-y-2">
+					<input
+						type="text"
+						bind:value={editCaptionVal}
+						placeholder="Caption"
+						class="input input-bordered input-sm w-full"
+					/>
+					<input
+						type="text"
+						bind:value={editTagsVal}
+						placeholder="Tags (comma-separated)"
+						class="input input-bordered input-sm w-full"
+					/>
+					{#if editError}
+						<div class="alert alert-error text-sm p-2">{editError}</div>
+					{/if}
 				</div>
-			{/if}
+			{:else}
+				{#if detailEntry.tags.length > 0}
+					<div class="flex flex-wrap gap-1 mt-2">
+						{#each detailEntry.tags as tag}
+							<span class="badge badge-sm badge-ghost">{tag}</span>
+						{/each}
+					</div>
+				{/if}
 
-			{#if detailEntry.caption}
-				<p class="mt-2 text-sm">{detailEntry.caption}</p>
+				{#if detailEntry.caption}
+					<p class="mt-2 text-sm">{detailEntry.caption}</p>
+				{/if}
 			{/if}
 
 			{#if detailEntry.sourceSlideIds}
@@ -444,12 +530,23 @@
 				</button>
 				<a href={detailEntry.rawUrl} target="_blank" rel="noopener noreferrer" class="btn btn-sm">Open Original</a>
 				{#if $isConnected}
-					<button class="btn btn-sm btn-primary" onclick={() => { const id = detailEntry.id; closeDetail(); goAnnotate(id); }}>
-						Annotate
-					</button>
-					<button class="btn btn-sm btn-error" onclick={() => { const id = detailEntry.id; const ext = detailEntry.filename.split('.').pop(); closeDetail(); handleDelete(id, ext); }}>
-						{deletingId === detailEntry.id ? 'Deleting…' : 'Delete'}
-					</button>
+					{#if editMode}
+						<button class="btn btn-sm btn-primary" onclick={handleEditSave} disabled={editSaving}>
+							{#if editSaving}
+								<span class="loading loading-spinner loading-xs"></span>
+							{/if}
+							Save
+						</button>
+						<button class="btn btn-sm btn-ghost" onclick={() => (editMode = false)}>Cancel</button>
+					{:else}
+						<button class="btn btn-sm" onclick={() => (editMode = true)}>Edit</button>
+						<button class="btn btn-sm btn-primary" onclick={() => { const id = detailEntry.id; closeDetail(); goAnnotate(id); }}>
+							Annotate
+						</button>
+						<button class="btn btn-sm btn-error" onclick={() => { const id = detailEntry.id; const ext = detailEntry.filename.split('.').pop(); closeDetail(); handleDelete(id, ext); }}>
+							{deletingId === detailEntry.id ? 'Deleting…' : 'Delete'}
+						</button>
+					{/if}
 				{/if}
 				<button class="btn btn-sm" onclick={closeDetail}>Close</button>
 			</div>
