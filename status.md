@@ -102,3 +102,17 @@
 [REMEDIATION] 9:53:35 PM || Remediation log appended (entry 3). Recycling loop with original spec + full delta history.
 [PHASE_STATUS] 9:53:35 PM || === 1_spec | attempt 3 | per-task commits enabled ===
 [EXECUTION] 9:53:35 PM || Launching Headless Pi for Phase: 1_spec (Attempt 3)
+[EXECUTION] 9:58:02 PM || Pi tool-loop settled successfully.
+[AUDIT] 9:58:02 PM || Running split critic: build/lint/test, hard constraints, baseline review...
+[AUDIT_SUB] 9:58:02 PM || Running BUILD_LINT_TEST sub-audit — 2 independent samples...
+[AUDIT_SAMPLE_CLEAN] 9:58:51 PM || BUILD_LINT_TEST sample 1/2: clean.
+[AUDIT_SAMPLE_CLEAN] 9:59:49 PM || BUILD_LINT_TEST sample 2/2: clean.
+[AUDIT_SUB_CLEAN] 9:59:49 PM || BUILD_LINT_TEST: clean across all 2 independent samples.
+[AUDIT_SUB] 9:59:49 PM || Running HARD_CONSTRAINTS sub-audit — 2 independent samples...
+[AUDIT_SAMPLE_CLEAN] 10:04:11 PM || HARD_CONSTRAINTS sample 1/2: clean.
+[AUDIT_SAMPLE_CLEAN] 10:07:37 PM || HARD_CONSTRAINTS sample 2/2: clean.
+[AUDIT_SUB_CLEAN] 10:07:37 PM || HARD_CONSTRAINTS: clean across all 2 independent samples.
+[AUDIT_SUB] 10:07:37 PM || Running BASELINE_REVIEW sub-audit — 2 independent samples...
+[AUDIT_SUB_ISSUES] 10:14:23 PM || BASELINE_REVIEW: at least one of 2 independent samples flagged a problem — sub-audit fails on dissent.
+[AUDIT_FAIL] 10:14:23 PM || Critic rejected workspace state. Error threshold: 4/3
+[CIRCUIT_BREAKER] 10:14:23 PM || Max remediation cycles reached for 1_spec. Halting pipeline for safety.

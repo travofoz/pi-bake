@@ -4,143 +4,81 @@ Critic found issues in one or more sub-audits:
 
 ### BASELINE_REVIEW — sample 1/2
 
-Now I have a complete picture of the codebase. Here is my full review.
+Here is my code review of the current codebase. I've read every source file in the project.
 
 ---
 
-## Code Review: Emmy
+## Code Review Results
 
-### Environment / Platform Correctness
+### Environment/Platform Correctness
 
-**No Node.js globals found.** All files use only browser APIs: `fetch`, `document.createElement`, `canvas`, `Blob`, `FileReader`, `URL.createObjectURL`, `atob`/`btoa`, `TextEncoder`/`TextDecoder`, `localStorage`, `Image`, `PointerEvent`, etc. No `Buffer`, `process`, `require`, `__dirname`, `__filename`, or `fs` references exist. With `ssr = false` and `prerender` selectively applied, the static SPA setup is consistent. ✅
+**No issues.** The project correctly targets a client-side SPA (`ssr: false`, `@sveltejs/adapter-static`). No Node.js-only globals (`Buffer`, `process`, `require`, `fs`, `__dirname`) are used anywhere in `src/`. `localStorage` is properly guarded with `typeof localStorage !== 'undefined'`. The only `process.env` reference is in `svelte.config.js` (build-time only, never shipped).
 
 ---
 
 ### Hardcoded Values
 
-- **Branch names**: resolved dynamically via `getDefaultBranch()` everywhere — no hardcoded `"main"` or `"master"`. ✅
-- **GitHub URLs**: constructed from dynamic `owner`/`repo`/`branch` values. The only static URL is the deep-link to GitHub's token creation page (`github.com/settings/tokens/new?scopes=repo&description=Emmy`) — intentional. ✅
-- **GIF tags**: now user-editable via an `<input>` (fixed in Remediation 1). ✅
+**No issues.** All previous hardcoded values have been resolved:
+- `gifTags` is user-editable (was `tags: ['gif']` forced), via a bound input with `'gif'` as a sensible default
+- Branch names resolved dynamically via `getDefaultBranch()` API call
+- `raw.githubusercontent.com` URL construction centralized in `rawFileUrl()` with proper `encodeURIComponent` on all segments
+- The connect modal wraps in a `<form>` so keyboard submission works
 
 ---
 
-### Security Basics
+### Security
 
-- **PAT in localStorage**: documented tradeoff in the connect modal with plain-language warning. Single-user tool, acceptable.
-- **CORS**: no server-side CORS config (static site). `raw.githubusercontent.com` serves with CORS headers. ✅
-- **XSS via `{@html}`**: `renderShapeSVG` in `annotations.js` uses `escapeAttr()` and `escapeXML()` which escape `&`, `"`, `'`, `<`, `>` for attribute values and text content. Numeric coordinates are coerced to numbers. This covers the main injection vectors. ✅
-- **`viewBox` injection**: `viewBox="0 0 {entry.width} {entry.height}"` interpolates from JSON metadata (user-controlled in a single-user tool). No cross-user risk given the single-tenant design.
-- **No secrets in client code**: PAT comes from user input at runtime, never baked into the bundle. ✅
+**No exploitable issues.** Key observations:
 
----
-
-### Framework Footguns
-
-- **Buttons without `type` inside `<form>`**: no `<form>` elements exist anywhere in the Svelte templates. All buttons either have `type="button"` or are standalone. ✅
-- **Unhandled promise rejections**: all async event handlers (`handleUpload`, `handleDelete`, `handleEditSave`, `saveAnnotations`, `handleExport`, `loadGallery`) have internal `try/catch`. ✅
-- **Loading / error states**: present around every async action (spinner, disabled state, error alert). ✅
-- **`{#each}` keys**: gallery items keyed by `entry.id`, shapes keyed by `shape.id`. ✅
-- **`onDestroy` cleanup**: present for both the `window` event listener in `+layout.svelte` and the `playInterval` in the slideshow page (fixed in Remediation 2). ✅
+- **SVG `{@html}` injection is properly guarded.** All shape attribute values pass through `escapeAttr()` (XML-escapes `& " ' < >`), and text content goes through `escapeXML()`. This prevents XSS via annotation metadata.
+- **PAT in localStorage is a documented tradeoff**, not a bug. The UI itself warns about the XSS exposure and explains why it's accepted for a single-user tool.
+- **No `innerHTML`, `document.write`, or unbounded string interpolation** anywhere in `src/`.
+- **The PAT is only sent to `api.github.com`** via Octokit's authenticated requests, never to third parties.
 
 ---
 
-### Issues Found
+### Framework Footguns & Other Issues
 
-#### 1. 🐛 **`setInterval` fixed delay breaks per-slide durations in slideshow preview**
+**Three issues found:**
 
-**File:** `src/routes/slideshow/+page.svelte`, function `startPlay()` (line ~86)
+#### Issue 1—Dead/no-op ternary in GIF encoder (`src/lib/gif-export.js`, line ~244)
 
-```javascript
-function startPlay() {
-    if (slides.length === 0) return;
-    isPlaying = true;
-    previewIndex = 0;
-    playInterval = setInterval(() => {
-      const nextIndex = (previewIndex + 1) % slides.length;
-      if (nextIndex === 0) stopPlay();
-      else previewIndex = nextIndex;
-    }, slides[previewIndex]?.delay || defaultDelay);
-}
+```js
+encoder.writeFrame(indexData, width, height, {
+    palette: isFirst ? palette : palette,  // both branches identical
+    ...
+});
 ```
 
-`setInterval` evaluates its delay argument **once** at creation time — it captures `slides[0]?.delay` (the first slide's delay, since `previewIndex` was just set to 0). All subsequent slides play at that same fixed interval regardless of their individual `delay` settings.
+`isFirst ? palette : palette` always evaluates to `palette`. The `isFirst` variable and the conditional are dead. The comment says "Always provide palette for local color table" — if that's the intent, just write `palette`. If the intent was to pass palette only on the first frame (global color table) and omit it for subsequent frames, that's a real functional issue. Either way, the current ternary is dead code.
 
-The UI lets users configure per-slide delays (range slider + per-slide number input), and those delays **are** correctly passed to `gifenc` during export, so they work in the output GIF. But the in-app preview ignores them.
+#### Issue 2—Blob URL revoked before download can start (`src/routes/slideshow/+page.svelte`, lines 177–179)
 
-**Fix:** Use recursive `setTimeout` that reads `slides[previewIndex]?.delay` on each tick, or restart `setInterval` with the next slide's delay on every tick.
-
----
-
-#### 2. 🟡 **Blob URL leak on file re-select in gallery upload**
-
-**File:** `src/routes/+page.svelte`
-- `handleFileSelect` (line ~70) — creates `URL.createObjectURL(file)` for preview without revoking any previous blob URL
-- The `ondrop` handler (line ~268) — same issue
-
-If a user selects/drops a file, then selects/drops another without clicking Cancel (which triggers `clearUpload()` and revokes the old URL), the previous blob URL is orphaned. The memory is freed on page navigation, but within a session these can accumulate.
-
-**Fix:** In both handlers, call `URL.revokeObjectURL(uploadPreview)` before overwriting it.
-
----
-
-#### 3. 🟡 **`estimateGifSize` computed twice during GIF export**
-
-**File:** `src/lib/gif-export.js`
-
-- `exportAndCommitGIF` calls `encodeGIF(slides, { scale })` (line ~307), which internally calls `estimateGifSize` to auto-determine scale if none provided.
-- Then on line ~310, `exportAndCommitGIF` calls `estimateGifSize` **again** to get `suggestedScale` for metadata dimensions.
-
-When `scale` is provided by the user (always the case from the UI slider), the first call in `encodeGIF` uses it directly (no auto-compute), but the second call in `exportAndCommitGIF` still re-runs the estimation.
-
-**Fix:** Compute dimensions from `encodeGIF`'s return value, or pass the effective scale back from `encodeGIF`, or compute dimensions from the first slide directly rather than re-estimating.
-
----
-
-#### 4. 🟡 **`scale || autoCompute` uses `||` instead of `??`**
-
-**File:** `src/lib/gif-export.js`, line ~310
-
-```javascript
-const effectiveScale = scale || estimateGifSize(slides, 20).suggestedScale;
+```js
+a.href = URL.createObjectURL(result.blob);
+a.download = `${result.id}.gif`;
+a.click();
+URL.revokeObjectURL(a.href);  // revoked immediately — browser may not have started the download
 ```
 
-If `scale` is ever explicitly `0` (a valid falsy value), `||` would incorrectly override it with the auto-computed value. Currently unreachable from the UI (slider min = 0.25), but a latent bug.
+`URL.revokeObjectURL()` is called synchronously right after `a.click()`. The browser's download pipeline may not have initiated yet, meaning the blob (and its backing memory) could be freed before the browser reads it. The download will appear to succeed but produce a zero-byte or failed file. Fix: either don't revoke (the blob will be garbage-collected when the document unloads), or defer revocation (e.g., `setTimeout(() => URL.revokeObjectURL(a.href), 5000)`).
 
-**Fix:** Use `??` (nullish coalescing): `const effectiveScale = scale ?? estimateGifSize(slides, 20).suggestedScale;`
+#### Issue 3—Svelte 5 async `$effect` without lifecycle tracking (3 files)
 
----
+All three of these components fire an async function from `$effect` without any lifecycle guard:
 
-#### 5. 🟡 **Vestigial `e.preventDefault()` in `saveConnect`**
+| File | Line | Pattern |
+|------|------|---------|
+| `src/routes/+page.svelte` | ~55 | `$effect(() => { if ($githubRepo) loadGallery(); })` |
+| `src/routes/annotate/[id]/+page.svelte` | ~25 | `$effect(() => { if (id && $githubToken && $githubRepo) loadImage(); })` |
+| `src/routes/slideshow/+page.svelte` | ~96 | `$effect(() => { if ($githubRepo) loadEntries(); })` |
 
-**File:** `src/routes/+layout.svelte`, line ~43
+In Svelte 5, mutating `$state` variables after a component has been destroyed throws a runtime error. If the user navigates away before the async call completes (e.g., rapid back/forth between pages), the `loading = false`, `entries = ...`, `error = ...` assignments inside the callback will fire on a destroyed component. The fix is either:
+- Track a `destroyed` flag and check it before state mutations, or
+- Use an `AbortController`/`.finally` guard, or
+- Move the async call to a rune-based pattern that cancels on re-run.
 
-```javascript
-function saveConnect(e) {
-    e.preventDefault();
-    // ...
-}
-```
-
-Called from `<button type="button" onclick={saveConnect}>`. There is no `<form>` element anywhere in the modal, so `e.preventDefault()` on a `MouseEvent` from a button click is a no-op. Harmless, but indicates the handler was written expecting a `<form>` submission context that was later removed.
-
-**Fix:** Either wrap the modal content in `<form onsubmit={saveConnect}>` and let `e.preventDefault()` serve its purpose, or remove the parameter and the `e.preventDefault()` call.
-
----
-
-### Remediation 2 Task Status (verification)
-
-Since several Remediation 2 tasks were mentioned as unchecked, I verified them against the current code:
-
-| Task | Status |
-|------|--------|
-| Pointer Events (touch+mouse dedup) | ✅ **Done** — `onpointerdown`/`onpointermove`/`onpointerup` used throughout |
-| Slideshow auth gating | ✅ **Done** — `$effect` guarded by `if ($githubRepo)` without token requirement |
-| `strokeWidth` in `arrowHead()` | ✅ **Done** — `headLen = baseLen * (1 + (strokeWidth - 2) * 0.15)` uses the parameter |
-| GIF export text rendering | ✅ **Appears aligned** — all three paths fill without stroke, and transparent fill falls back to `strokeColor` |
-| Dynamic imports → static | ✅ **Done** — `upload.js` and `gif-export.js` use static `import` for local modules |
-| `onDestroy` in slideshow | ✅ **Done** — `onDestroy` clears `playInterval` |
-| `getLatestCommitSha` dead code | ✅ **Done** — function no longer exists in `github.js` |
-| Deduplicate `arrowHead` in gif-export.js | ❌ **Still open** — `gif-export.js` has its own inline arrowhead calculation with canvas scaling; could share the base geometry from `annotations.js` and apply scaling separately |
+In practice, this is unlikely to hit in normal use (async calls complete quickly, navigation is rare during loading), but it's a real Svelte 5 footgun that will cause hard-to-diagnose errors if it does.
 
 ---
 
@@ -149,52 +87,110 @@ Since several Remediation 2 tasks were mentioned as unchecked, I verified them a
 
 ### BASELINE_REVIEW — sample 2/2
 
-I've now done a thorough review of every file in `src/`. Let me compile my findings.
+Now I have all the information needed for a comprehensive review. Here is my analysis:
 
 ---
 
-## Code Review Results
+## Code Review Findings
 
-### Issues Found
+### CRITICAL: `rawFileUrl` breaks all URLs with `encodeURIComponent` on the full path
 
-**1. Connect modal lacks `<form>` — no keyboard submission, dead `preventDefault()` call**
+**File:** `src/lib/github.js`, line 186
 
-- **File:** `src/routes/+layout.svelte` (lines 94–168)
-- **Details:** The connect modal's inputs and buttons are not wrapped in a `<form>` element. The `saveConnect` function calls `e.preventDefault()` (a form-submit idiom), but it's wired to a `<button type="button" onclick={saveConnect}>` — where `preventDefault()` is a no-op.  
-  Because there's no `<form>`, pressing Enter inside the repo/token inputs does nothing. Users must click the "Connect" button every time. This is an accessibility and UX issue, and the dead `e.preventDefault()` call suggests the form structure was intended but not completed.
+```js
+export function rawFileUrl(owner, repo, branch, path) {
+    return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/${encodeURIComponent(path)}`;
+}
+```
 
-**2. `raw.githubusercontent.com` URL pattern duplicated across four files**
+`encodeURIComponent` encodes `/` as `%2F`. Every call site passes a path like `images/2026-07-11-a1b2c3.png`, producing:
 
-- **Files:**  
-  `src/lib/gallery.js:67`  
-  `src/lib/upload.js:213`  
-  `src/lib/gif-export.js:329`  
-  `src/routes/annotate/[id]/+page.svelte:55`
-- **Details:** The URL `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${filename}` is hand-assembled in four separate locations. No URL-encoding is applied to the branch name or filename. If a branch ever contained characters like `#` or `?`, the URL would be malformed. A shared utility function (`rawFileUrl(owner, repo, branch, path)`) would centralize and fix this.
+```
+https://raw.githubusercontent.com/owner/repo/branch/images%2F2026-07-11-a1b2c3.png
+```
 
-**3. `URL.createObjectURL` leak on re-selection/drop without prior revoke**
+GitHub's raw content server treats `%2F` as a literal path segment character, not a separator. The server looks for a file literally named `images%2F2026-07-11-a1b2c3.png` inside the branch root, which doesn't exist → **every image, GIF, and metadata URL returns 404**. All four callers (gallery.js, upload.js, gif-export.js, annotate/\[id]/+page.svelte) are affected.
 
-- **File:** `src/routes/+page.svelte` (drop handler around line 39, `handleFileSelect` around line 52)
-- **Details:** When a file is selected or dropped, `uploadPreview = URL.createObjectURL(file)` is called. If a user drops/selects a second file without first calling `clearUpload()` (which revokes the existing URL), the previous object URL leaks until the page is navigated away or reloaded. Minor memory leak, not a correctness issue at single-user scale.
+**Fix:** Split path segments, encode individually, then rejoin:
 
-### Everything Else Is Clean
+```js
+export function rawFileUrl(owner, repo, branch, path) {
+    const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+    return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/${encodedPath}`;
+}
+```
 
-I checked every file for:
+---
 
-| Category | Status |
-|---|---|
-| **Environment/platform** — no Node-only globals (`Buffer`, `process`, `require`, `__dirname`, `fs`) in `src/` | ✅ Clean — all browser APIs guarded with `typeof` checks where needed |
-| **Dynamic imports that should be static** | ✅ Clean — the one remaining `await import('gifenc')` is inside `encodeGIF`, which is a legitimate code-splitting boundary; all local module imports are static |
-| **Hardcoded values** (`getLatestCommitSha`, tokens, API keys, branch names) | ✅ Clean — no dead functions; repo/branch/token are all user-supplied or fetched dynamically |
-| **XSS in SVG `{@html}`** — `renderShapeSVG` attribute/text escaping | ✅ Clean — `escapeAttr` and `escapeXML` properly sanitize all interpolated content |
-| **`<button>` inside `<form>` without `type`** (implicit submit) | ✅ Clean — no `<button>` without `type` lives inside a `<form>` |
-| **Unhandled promise rejections** | ✅ Clean — every async function called from a template/reactive context catches its own errors internally |
-| **Missing error/loading states** | ✅ Clean — upload, edit, delete, export, annotation save all have error + loading states |
-| **Event listener / interval cleanup** | ✅ Clean — `onDestroy` clears the slideshow interval; `$effect` returns cleanup for the `open-connect` listener |
-| **PointerEvent unification** (prevents mouse+touch double-fire) | ✅ Clean — already using `onpointerdown/onpointermove/onpointerup` |
-| **Text annotation rendering consistency** (SVG vs canvas) | ✅ Clean — all three paths (editor SVG, gallery SVG, canvas) agree on fill-color logic for text |
-| **`arrowHead` deduplication** | ✅ Clean — imported from `$lib/annotations.js` in the editor |
-| **Slideshow page auth gating** | ✅ Clean — guard is `if ($githubRepo)`, not `if ($githubToken && $githubRepo)` |
-| **CORS for canvas-based GIF export** | ✅ `crossOrigin = 'anonymous'` is set; `raw.githubusercontent.com` serves CORS headers in practice |
+### BUG: Upload success message is set then immediately cleared, never visible
+
+**File:** `src/routes/+page.svelte`, lines 298–300
+
+```js
+uploadSuccess = `Uploaded: ${result.id}`;
+clearUpload();
+await loadGallery();
+```
+
+`clearUpload()` (line 89–97) sets `uploadSuccess = ''`. Because both assignments happen in the same synchronous block before any `await`, Svelte batches the state update and only the final value (`''`) reaches the DOM. The `<div class="alert alert-success">` block is never rendered.
+
+The upload UX provides no visible feedback — the gallery just re-renders, which the user may not notice.
+
+**Fix:** Save the message before clearing:
+
+```js
+const successMsg = `Uploaded: ${result.id}`;
+clearUpload();
+uploadSuccess = successMsg;
+await loadGallery();
+```
+
+---
+
+### MINOR: Blob URL revoked before download can start
+
+**File:** `src/routes/slideshow/+page.svelte`, lines 177–180
+
+```js
+a.href = URL.createObjectURL(result.blob);
+a.download = `${result.id}.gif`;
+a.click();
+URL.revokeObjectURL(a.href);
+```
+
+`URL.revokeObjectURL` immediately invalidates the blob URL. The browser's download mechanism is asynchronous — it must create a reference to the blob data after `click()` returns. On slower devices or under load, the download can fail silently (empty file or network error). The standard pattern is to delay revocation:
+
+```js
+const url = URL.createObjectURL(result.blob);
+a.href = url;
+a.download = `${result.id}.gif`;
+a.click();
+setTimeout(() => URL.revokeObjectURL(url), 10000);
+```
+
+---
+
+### MINOR: Blob URL leak on component unmount
+
+**File:** `src/routes/+page.svelte`
+
+The `uploadPreview` variable holds a blob URL created via `URL.createObjectURL`. While it is correctly revoked before being overwritten (in `handleFileSelect`, `ondrop`, and `clearUpload`), there is no cleanup on component destroy. If the user navigates away from the gallery page while a preview is displayed, the blob URL leaks until the tab is closed.
+
+Not impactful for a single-user tool but breaks the revocation contract for `URL.createObjectURL`.
+
+---
+
+### Summary
+
+| Severity | Issue | File | Status |
+|----------|-------|------|--------|
+| **CRITICAL** | `rawFileUrl` encodes `/` in path breaks all URLs | `src/lib/github.js:186` | Unfixed |
+| **BUG** | Upload success message cleared before rendering | `src/routes/+page.svelte:298-300` | Unfixed |
+| **MINOR** | Blob URL revoked before download starts | `src/routes/slideshow/+page.svelte:180` | Unfixed |
+| **MINOR** | Blob URL leak on component destroy | `src/routes/+page.svelte` | Unfixed |
+
+The remaining remediation items (Pointer Events unification, `$effect` guard on slideshow, arrow head deduplication, `estimateGifSize` duplication, `deleteFile` removal, dynamic import reduction, `onDestroy` cleanup, form wrapping) have all been correctly addressed in the current codebase.
+
+**Note on passing build:** The `rawFileUrl` encoding bug would not be caught by Vite/SvelteKit build or `svelte-check` — URL string construction has no type errors. It only manifests at runtime when the browser tries to load images and gets 404s.
 
 RESULT: ISSUES
