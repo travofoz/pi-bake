@@ -3,7 +3,7 @@
 	import { githubToken, githubRepo, isConnected } from '$lib/stores.js';
 	import { fetchGallery, filterGallery, deleteEntry } from '$lib/gallery.js';
 	import { uploadImage } from '$lib/upload.js';
-	import { createClient, parseRepo, putFile, getDefaultBranch } from '$lib/github.js';
+	import { createClient, parseRepo, putFile, getDefaultBranch, getFile } from '$lib/github.js';
 	import { renderAnnotationsSVG } from '$lib/annotations.js';
 
 	/** @type {import('$lib/gallery.js').GalleryEntry[]} */
@@ -209,7 +209,6 @@
 			const jsonContent = JSON.stringify(updatedMetadata, null, 2);
 
 			// Read the current file SHA first
-			const { getFile } = await import('$lib/github.js');
 			const jsonPath = detailEntry.jsonPath;
 			const existing = await getFile(octokit, owner, repo, jsonPath);
 			const sha = existing ? existing.sha : undefined;
