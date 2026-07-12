@@ -1,4 +1,4 @@
-import { createClient, parseRepo, listDir, getFile } from './github.js';
+import { createClient, parseRepo, listDir, getFile, deleteFile, getDefaultBranch } from './github.js';
 
 /**
  * @typedef {import('./github.js').OctokitInstance} OctokitInstance
@@ -37,6 +37,8 @@ export async function fetchGallery(token, repoString) {
 
 	const { owner, repo } = parsed;
 
+	const branch = await getDefaultBranch(octokit, owner, repo);
+
 	let items;
 	try {
 		items = await listDir(octokit, owner, repo, 'images');
@@ -59,9 +61,10 @@ export async function fetchGallery(token, repoString) {
 				/** @type {GalleryEntry} */
 				const entry = {
 					...metadata,
+					branch,
 					jsonPath: jsonItem.path,
 					imagePath: `images/${metadata.filename}`,
-					rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/main/images/${metadata.filename}`
+					rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${metadata.filename}`
 				};
 				return entry;
 			} catch {
@@ -73,6 +76,67 @@ export async function fetchGallery(token, repoString) {
 
 	return entries.filter((e) => e !== null)
 		.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+/**
+ * Delete a gallery entry: removes both the JSON metadata and the image file.
+ * Returns the entry id on success.
+ *
+ * @param {string} token
+ * @param {string} repoString - "owner/repo"
+ * @param {string} id - entry id (e.g. "2026-07-12-xxxxxx")
+ * @param {string} ext - file extension (e.g. "jpg")
+ * @returns {Promise<string>}
+ */
+export async function deleteEntry(token, repoString, id, ext) {
+	const octokit = createClient(token);
+	const parsed = parseRepo(repoString);
+	if (!octokit || !parsed) throw new Error('GitHub not connected');
+
+	const { owner, repo } = parsed;
+
+	const jsonPath = `images/${id}.json`;
+	const imagePath = `images/${id}.${ext}`;
+
+	// Get SHAs for both files
+	const [jsonSha, imageSha] = await Promise.all([
+		getFileSha(octokit, owner, repo, jsonPath),
+		getFileSha(octokit, owner, repo, imagePath)
+	]);
+
+	if (!jsonSha && !imageSha) throw new Error(`Entry ${id} not found`);
+
+	// Delete both files
+	const deletions = [];
+	if (jsonSha) {
+		deletions.push(
+			deleteFile(octokit, owner, repo, jsonPath, jsonSha, `Delete metadata for ${id}`)
+		);
+	}
+	if (imageSha) {
+		deletions.push(
+			deleteFile(octokit, owner, repo, imagePath, imageSha, `Delete image ${id}.${ext}`)
+		);
+	}
+	await Promise.all(deletions);
+
+	return id;
+}
+
+/**
+ * Get the SHA of a file in the repo (needed for deletion).
+ * Returns null if the file doesn't exist.
+ */
+async function getFileSha(octokit, owner, repo, path) {
+	try {
+		const resp = await octokit.rest.repos.getContent({ owner, repo, path });
+		const data = resp.data;
+		if ('sha' in data) return data.sha;
+		return null;
+	} catch (err) {
+		if (err.status === 404) return null;
+		throw err;
+	}
 }
 
 /**

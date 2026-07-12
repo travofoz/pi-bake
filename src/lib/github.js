@@ -33,6 +33,26 @@ export function createClient(token) {
 	return new Octokit({ auth: token });
 }
 
+const defaultBranchCache = new Map();
+
+/**
+ * Get the default branch name for a repo.
+ * Fetches from the GitHub API once and caches the result.
+ *
+ * @param {OctokitInstance} octokit
+ * @param {string} owner
+ * @param {string} repo
+ * @returns {Promise<string>}
+ */
+export async function getDefaultBranch(octokit, owner, repo) {
+	const key = `${owner}/${repo}`;
+	if (defaultBranchCache.has(key)) return defaultBranchCache.get(key);
+	const resp = await octokit.rest.repos.get({ owner, repo });
+	const branch = resp.data.default_branch;
+	defaultBranchCache.set(key, branch);
+	return branch;
+}
+
 /**
  * Parse "owner/repo" string into { owner, repo }.
  * @param {string} repoString
@@ -130,6 +150,27 @@ export async function putBinaryFile(octokit, owner, repo, path, base64Content, m
 		sha: resp.data.content.sha,
 		commit: resp.data.commit
 	};
+}
+
+/**
+ * Delete a file from the repo. Creates a deletion commit on the default branch.
+ *
+ * @param {OctokitInstance} octokit
+ * @param {string} owner
+ * @param {string} repo
+ * @param {string} path - file path within the repo
+ * @param {string} sha - SHA of the file to delete (required by GitHub API)
+ * @param {string} message - commit message
+ * @returns {Promise<void>}
+ */
+export async function deleteFile(octokit, owner, repo, path, sha, message) {
+	await octokit.rest.repos.deleteFile({
+		owner,
+		repo,
+		path,
+		message,
+		sha
+	});
 }
 
 /**

@@ -295,7 +295,8 @@ export async function encodeGIF(slides, options = {}) {
  */
 export async function exportAndCommitGIF(octokit, owner, repo, slides, options = {}) {
 	const { tags = [], caption = '', scale } = options;
-	const { putBinaryFile, putFile } = await import('./github.js');
+	const { putBinaryFile, putFile, getDefaultBranch } = await import('./github.js');
+	const branch = await getDefaultBranch(octokit, owner, repo);
 	const { generateImageId, buildMetadata, blobToBase64 } = await import('./upload.js');
 
 	const id = generateImageId();
@@ -319,7 +320,7 @@ export async function exportAndCommitGIF(octokit, owner, repo, slides, options =
 	const base64 = await blobToBase64(blob);
 	await putBinaryFile(octokit, owner, repo, gifPath, base64, `Export GIF ${id}`);
 
-	const gifUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${gifPath}`;
+	const gifUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${gifPath}`;
 
 	// Build metadata with sourceSlideIds
 	const sourceSlideIds = slides.map((s) => s.id);

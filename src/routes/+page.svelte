@@ -1,7 +1,7 @@
 <script>
 	import { goto } from '$app/navigation';
 	import { githubToken, githubRepo } from '$lib/stores.js';
-	import { fetchGallery, filterGallery } from '$lib/gallery.js';
+	import { fetchGallery, filterGallery, deleteEntry } from '$lib/gallery.js';
 	import { uploadImage } from '$lib/upload.js';
 	import { createClient, parseRepo } from '$lib/github.js';
 	import { renderAnnotationsSVG, isTransparent } from '$lib/annotations.js';
@@ -29,6 +29,25 @@
 
 	// Detail view modal
 	let detailEntry = $state(null);
+
+	// Delete state
+	let deletingId = $state('');
+	let deleteError = $state('');
+
+	async function handleDelete(id, ext) {
+		if (!confirm(`Delete ${id}? This cannot be undone.`)) return;
+		deletingId = id;
+		deleteError = '';
+		try {
+			await deleteEntry($githubToken, $githubRepo, id, ext);
+			if (detailEntry?.id === id) closeDetail();
+			await loadGallery();
+		} catch (err) {
+			deleteError = err.message || 'Failed to delete';
+		} finally {
+			deletingId = '';
+		}
+	}
 
 	$effect(() => {
 		if ($githubToken && $githubRepo) {
@@ -332,11 +351,22 @@
 							>
 								View
 							</button>
+							<button
+								class="btn btn-ghost btn-xs text-error"
+								onclick={() => handleDelete(entry.id, entry.filename.split('.').pop())}
+								disabled={deletingId === entry.id}
+							>
+								{deletingId === entry.id ? 'Deleting…' : 'Delete'}
+							</button>
 						</div>
 					</div>
 				</div>
 			{/each}
 		</div>
+	{/if}
+
+	{#if deleteError}
+		<div class="alert alert-error text-sm mt-4">{deleteError}</div>
 	{/if}
 </div>
 
@@ -400,6 +430,9 @@
 				<a href={detailEntry.rawUrl} target="_blank" rel="noopener noreferrer" class="btn btn-sm">Open Original</a>
 				<button class="btn btn-sm btn-primary" onclick={() => { const id = detailEntry.id; closeDetail(); goAnnotate(id); }}>
 					Annotate
+				</button>
+				<button class="btn btn-sm btn-error" onclick={() => { const id = detailEntry.id; const ext = detailEntry.filename.split('.').pop(); closeDetail(); handleDelete(id, ext); }}>
+					{deletingId === detailEntry.id ? 'Deleting…' : 'Delete'}
 				</button>
 				<button class="btn btn-sm" onclick={closeDetail}>Close</button>
 			</div>

@@ -193,8 +193,9 @@ export async function uploadImage(octokit, owner, repo, file, options = {}) {
 	const { blob: processedBlob, width, height } = await resizeImage(file);
 	const base64 = await blobToBase64(processedBlob);
 
-	// Import putBinaryFile and putFile dynamically to avoid circular deps
-	const { putBinaryFile, putFile } = await import('./github.js');
+	// Import dynamically to avoid circular deps
+	const { putBinaryFile, putFile, getDefaultBranch } = await import('./github.js');
+	const branch = await getDefaultBranch(octokit, owner, repo);
 
 	// Commit image file first
 	const imageResult = await putBinaryFile(
@@ -209,7 +210,7 @@ export async function uploadImage(octokit, owner, repo, file, options = {}) {
 		`Add metadata for ${filename}`
 	);
 
-	const imageUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${imagePath}`;
+	const imageUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${imagePath}`;
 
 	return { id, imageUrl };
 }

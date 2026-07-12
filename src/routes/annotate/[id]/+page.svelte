@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import AnnotationEditor from '$lib/components/AnnotationEditor.svelte';
 	import { githubToken, githubRepo } from '$lib/stores.js';
-	import { createClient, parseRepo, getFile, putFile } from '$lib/github.js';
+	import { createClient, parseRepo, getFile, putFile, getDefaultBranch } from '$lib/github.js';
 
 	let id = $derived($page.params.id);
 
@@ -36,9 +36,12 @@
 				return;
 			}
 
+			const { owner, repo } = parsed;
+			const branch = await getDefaultBranch(octokit, owner, repo);
+
 			// Read the JSON metadata file
 			const jsonPath = `images/${id}.json`;
-			const result = await getFile(octokit, parsed.owner, parsed.repo, jsonPath);
+			const result = await getFile(octokit, owner, repo, jsonPath);
 			if (!result) {
 				error = `Metadata not found for ${id}`;
 				return;
@@ -49,7 +52,7 @@
 				...data,
 				jsonPath,
 				imagePath: `images/${data.filename}`,
-				rawUrl: `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/main/images/${data.filename}`,
+				rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${data.filename}`,
 				_sha: result.sha // store sha for updating
 			};
 
