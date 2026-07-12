@@ -203,28 +203,6 @@ export async function listDir(octokit, owner, repo, path) {
 }
 
 /**
- * Search the repo for files matching a query.
- * Useful for finding images by tag, etc.
- *
- * @param {OctokitInstance} octokit
- * @param {string} owner
- * @param {string} repo
- * @param {string} query - GitHub code search query
- * @returns {Promise<Array<{ name: string, path: string, sha: string }>>}
- */
-export async function searchRepo(octokit, owner, repo, query) {
-	const fullQuery = `repo:${owner}/${repo} ${query}`;
-	const resp = await octokit.rest.search.code({
-		q: fullQuery
-	});
-	return resp.data.items.map((item) => ({
-		name: item.name,
-		path: item.path,
-		sha: item.sha
-	}));
-}
-
-/**
  * Get the SHA of the latest commit on the default branch.
  * Used as a reference for creating blobs/trees if needed.
  *

@@ -4,7 +4,7 @@
 	import { fetchGallery, filterGallery, deleteEntry } from '$lib/gallery.js';
 	import { uploadImage } from '$lib/upload.js';
 	import { createClient, parseRepo } from '$lib/github.js';
-	import { renderAnnotationsSVG, isTransparent } from '$lib/annotations.js';
+	import { renderAnnotationsSVG } from '$lib/annotations.js';
 
 	/** @type {import('$lib/gallery.js').GalleryEntry[]} */
 	let entries = $state([]);
