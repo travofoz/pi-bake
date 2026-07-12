@@ -546,7 +546,7 @@
 						<button class="btn btn-sm btn-primary" onclick={() => { const id = detailEntry.id; closeDetail(); goAnnotate(id); }}>
 							Annotate
 						</button>
-						<button class="btn btn-sm btn-error" onclick={() => { const id = detailEntry.id; const ext = detailEntry.filename.split('.').pop(); closeDetail(); handleDelete(id, ext); }}>
+						<button class="btn btn-sm btn-error" onclick={() => { const id = detailEntry.id; const ext = detailEntry.filename.split('.').pop(); handleDelete(id, ext); }}>
 							{deletingId === detailEntry.id ? 'Deleting…' : 'Delete'}
 						</button>
 					{/if}
