@@ -367,6 +367,8 @@
 <script context="module">
 	/**
 	 * Compute arrowhead polygon points.
+	 * Scales the arrow head size proportionally to strokeWidth so thicker
+	 * strokes get larger arrowheads.
 	 * @param {number} x1
 	 * @param {number} y1
 	 * @param {number} x2
@@ -376,7 +378,8 @@
 	 */
 	function arrowHead(x1, y1, x2, y2, strokeWidth) {
 		const angle = Math.atan2(y2 - y1, x2 - x1);
-		const headLen = Math.min(12, Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) * 0.3);
+		const baseLen = Math.min(12, Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) * 0.3);
+		const headLen = baseLen * (1 + (strokeWidth - 2) * 0.15);
 		const headAngle = Math.PI / 6;
 		const hx1 = x2 - headLen * Math.cos(angle - headAngle);
 		const hy1 = y2 - headLen * Math.sin(angle - headAngle);
