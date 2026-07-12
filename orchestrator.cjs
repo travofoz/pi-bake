@@ -32,6 +32,24 @@ const MAX_BUFFER = 1024 * 1024 * 100; // 100MB
 const PI_TIMEOUT_MS = Number(process.env.PI_TIMEOUT_MS) || 2 * 60 * 60 * 1000; // 2 hr default
 
 /**
+ * How many independent samples to run per critic sub-audit before trusting the result.
+ * This is the real reliability fix: one sampling of one model is noisy — same prompt,
+ * same code, can land PASS one run and FAIL the next on pure variance. Running N
+ * independent samples and requiring ALL of them to agree the code is clean (any single
+ * dissent fails the sub-audit) catches that noise directly, using the same model —
+ * this is standard self-consistency, not a workaround for a weaker model.
+ * Override: ORCHESTRATOR_CRITIC_SAMPLES=3 node orchestrator.js
+ */
+const CRITIC_SAMPLES = Number(process.env.ORCHESTRATOR_CRITIC_SAMPLES) || 2;
+
+/**
+ * Optional model override for critic sub-audits only, e.g. "openai/gpt-5.6-sol". Off by
+ * default. This is a minor extra, not the reliability mechanism — CRITIC_SAMPLES above is.
+ * If you want it anyway: pi's own docs confirm --model is a real per-invocation flag.
+ */
+const CRITIC_MODEL = process.env.ORCHESTRATOR_CRITIC_MODEL || null;
+
+/**
  * Logs to stdout AND appends to status.md so the run can be watched live from another
  * session: `tail -f status.md`
  */
@@ -90,16 +108,20 @@ function verifyEnvironment() {
  * anything else (a real bug, bad auth) gets a couple of quick retries then fails fast,
  * since waiting won't fix a broken API key.
  * @param {string} promptText
+ * @param {string|null} [modelOverride] - optional pi --model id/pattern for this call only
  * @returns {string} stdout
  */
-function runHeadlessPi(promptText) {
+function runHeadlessPi(promptText, modelOverride = null) {
   const RATE_LIMIT_PATTERN = /rate.?limit|429|quota exceeded|too many requests|overloaded|try again later/i;
   const GENERIC_MAX_RETRIES = 2;
   const RATE_LIMIT_MAX_RETRIES = 5;
 
+  const args = ['-p', promptText];
+  if (modelOverride) args.push('--model', modelOverride);
+
   let attempt = 0;
   while (true) {
-    const result = spawnSync('pi', ['-p', promptText], {
+    const result = spawnSync('pi', args, {
       cwd: __dirname,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'], // capture stderr instead of inheriting so we can inspect it
@@ -202,20 +224,18 @@ function gitCheckpoint(message) {
 }
 
 /**
- * Tolerant verdict parse. Scans the head of the output for a VERDICT: PASS/FAIL
- * pattern, stripping common markdown noise (bullets, bold, headers) the model
- * might wrap around it despite instructions not to. Strict-but-brittle exact-first-
- * line matching was flagged as a real risk — a stray "**VERDICT: PASS**" or a
- * leading bullet would have false-negatived into a wasted remediation cycle.
- * @param {string} auditOutput
- * @returns {{status: 'PASS'|'FAIL'|'MALFORMED', firstLine: string}}
+ * Tolerant result parse for a sub-audit. Scans the head of the output for a
+ * RESULT: CLEAN/ISSUES pattern, stripping common markdown noise (bullets, bold,
+ * headers) the model might wrap around it despite instructions not to.
+ * @param {string} output
+ * @returns {{result: 'CLEAN'|'ISSUES'|'MALFORMED', firstLine: string}}
  */
-function parseVerdict(auditOutput) {
-  const firstLine = (auditOutput.split('\n')[0] || '').trim();
-  const head = auditOutput.slice(0, 500).replace(/[*_`>#-]/g, '');
-  const match = head.match(/VERDICT:\s*(PASS|FAIL)/i);
-  if (!match) return { status: 'MALFORMED', firstLine };
-  return { status: /** @type {'PASS'|'FAIL'} */ (match[1].toUpperCase()), firstLine };
+function parseAuditResult(output) {
+  const firstLine = (output.split('\n')[0] || '').trim();
+  const head = output.slice(0, 500).replace(/[*_`>#-]/g, '');
+  const match = head.match(/RESULT:\s*(CLEAN|ISSUES)/i);
+  if (!match) return { result: 'MALFORMED', firstLine };
+  return { result: /** @type {'CLEAN'|'ISSUES'} */ (match[1].toUpperCase()), firstLine };
 }
 
 /**
@@ -255,28 +275,75 @@ function runPhaseToCompletion(originalPhaseName, originalSpecContent) {
 
     // --- LAYER 2: THE CONTEXT-BLIND CRITIC GATE ---
     // "Context-blind" = blind to the executor's session/reasoning, not blind to the spec.
-    // The critic is a fresh process with zero continuity from the executor run above — it
-    // never sees the builder's self-report, only phaseRequirements and whatever's on disk.
-    log('AUDIT', 'Spawning Ephemeral, Context-Blind Critic to evaluate workspace state...');
-    const criticPrompt = `Act as a brutal, adversarial forensic systems auditor. Analyze the current codebase state in the workspace against the exact requirements outlined in this specification: \n\n${phaseRequirements}\n\n Before rendering judgment, identify what kind of project this is (look for package.json, build.gradle/settings.gradle, Cargo.toml, pyproject.toml/requirements.txt, go.mod, or whatever else is present) and actually RUN the appropriate build, lint, and test commands for that project type using your tools — do not just read the files and guess whether they'd pass. Report what you ran and its real output as part of your reasoning. You must judge using an uncompromising binary framework based on both the code inspection and the actual command output. If the codebase is completely implemented, matches all architectural rules, contains zero placeholders, stubs, or empty blocks, AND every verification command you ran actually passed, your output MUST start with exactly 'VERDICT: PASS'. If anything is missing, wrong, broken, or a command failed, your output MUST start with exactly 'VERDICT: FAIL', followed by a detailed technical postmortem including the real output of whatever failed.`;
+    // Each sub-audit below is a fresh process with zero continuity from the executor run
+    // above or from each other — none of them see a builder's self-report, only
+    // phaseRequirements and whatever's actually on disk.
+    //
+    // This is deliberately THREE separate focused calls instead of one call doing four
+    // jobs at once. A single dense prompt risks instruction dilution — the same reason a
+    // human reviewer doesn't run build, check requirements, and do a general code review
+    // in one unbroken pass. Splitting them also moves the PASS/FAIL decision out of any
+    // one model's holistic judgment: the aggregation below is plain deterministic code —
+    // if ANY sub-audit reports issues, the phase fails, full stop, no LLM re-judging the
+    // combination of the three.
+    log('AUDIT', 'Running split critic: build/lint/test, hard constraints, baseline review...');
 
-    let auditOutput = runHeadlessPi(criticPrompt);
-    fs.writeFileSync(AUDIT_FILE, auditOutput, 'utf8');
+    const buildLintTestPrompt = `Identify what kind of project this is (package.json, build.gradle, Cargo.toml, pyproject.toml/requirements.txt, go.mod, or whatever else is present) and actually RUN the appropriate build, lint, and test commands using your tools, checking the workspace against this specification for context on what's being built:\n\n${phaseRequirements}\n\nReport exactly what you ran and its real output. Your output MUST start with exactly 'RESULT: CLEAN' if every command you ran succeeded with no errors or warnings that indicate broken functionality. If no build/lint/test tooling is configured or applicable yet for this project at this phase, note that plainly and still output 'RESULT: CLEAN' — absence of tooling is not itself a failure unless the spec explicitly required setting it up. If any command you ran actually failed, your output MUST start with exactly 'RESULT: ISSUES' followed by the real command output and what's broken.`;
 
-    let { status, firstLine } = parseVerdict(auditOutput);
+    const constraintPrompt = `Extract every explicit hard constraint from this specification — anything phrased as "must", "never", "always", "do not", "non-negotiable", "no X" — into a checklist, then verify each one INDIVIDUALLY against the actual codebase in the workspace using your tools (read files, grep, whatever's needed):\n\n${phaseRequirements}\n\nYour output MUST start with exactly 'RESULT: CLEAN' if every individual constraint holds. If even one is violated, your output MUST start with exactly 'RESULT: ISSUES' followed by, for each violation, the exact constraint quoted from the spec and the exact code that violates it.`;
 
-    if (status === 'MALFORMED') {
-      log('AUDIT_MALFORMED', `Critic did not emit a valid VERDICT line (got: "${firstLine}"). Treating as FAIL and logging raw output for review.`);
+    const baselineReviewPrompt = `Act as a senior engineer doing a code review on the current codebase in the workspace, independent of any specific ticket or spec. Using your tools, check for:\n- Environment/platform correctness: infer the actual runtime target from the project itself (framework, adapter, presence/absence of a server) and flag any use of APIs that don't exist in that target (e.g. Node-only globals like Buffer, process, require, fs, __dirname in a browser/client-side project) — a passing build proves nothing here, since bundlers often don't error on this until real runtime execution.\n- Hardcoded values that should be resolved dynamically (hardcoded branch names, IDs, or URLs standing in for something obtainable via a real API or config lookup).\n- Security basics: secrets or tokens embedded in client-shipped code, unescaped user-controlled content, overly permissive auth/CORS patterns.\n- Common framework footguns (e.g. a <button> with no explicit type inside a <form> causing an implicit submit-and-reload, unhandled promise rejections around async calls, missing error/loading states around a user-triggered async action).\nThis list is illustrative, not exhaustive — apply the same reflexive standard you'd use in any real PR review, independent of whether the spec below happens to mention any of it. For context only, here is the phase specification:\n\n${phaseRequirements}\n\nYour output MUST start with exactly 'RESULT: CLEAN' if nothing above applies. If anything does, your output MUST start with exactly 'RESULT: ISSUES' followed by specifics: the exact file and why it's a problem.`;
+
+    const subAudits = [
+      { label: 'BUILD_LINT_TEST', prompt: buildLintTestPrompt },
+      { label: 'HARD_CONSTRAINTS', prompt: constraintPrompt },
+      { label: 'BASELINE_REVIEW', prompt: baselineReviewPrompt },
+    ];
+
+    let anyIssue = false;
+    let combinedFindings = '';
+    for (const sub of subAudits) {
+      log('AUDIT_SUB', `Running ${sub.label} sub-audit — ${CRITIC_SAMPLES} independent sample${CRITIC_SAMPLES > 1 ? 's' : ''}${CRITIC_MODEL ? `, model: ${CRITIC_MODEL}` : ''}...`);
+
+      let subIssue = false;
+      let subFindings = '';
+      for (let sample = 1; sample <= CRITIC_SAMPLES; sample++) {
+        const subOutput = runHeadlessPi(sub.prompt, CRITIC_MODEL);
+        const { result, firstLine } = parseAuditResult(subOutput);
+        if (result === 'MALFORMED') {
+          log('AUDIT_MALFORMED', `${sub.label} sample ${sample}/${CRITIC_SAMPLES} did not emit a valid RESULT line (got: "${firstLine}"). Treating as ISSUES.`);
+        }
+        if (result !== 'CLEAN') {
+          subIssue = true;
+          subFindings += `\n\n### ${sub.label} — sample ${sample}/${CRITIC_SAMPLES}\n\n${subOutput}`;
+        } else {
+          log('AUDIT_SAMPLE_CLEAN', `${sub.label} sample ${sample}/${CRITIC_SAMPLES}: clean.`);
+        }
+      }
+
+      if (subIssue) {
+        anyIssue = true;
+        combinedFindings += `\n\n## ${sub.label}${subFindings}`;
+        log('AUDIT_SUB_ISSUES', `${sub.label}: at least one of ${CRITIC_SAMPLES} independent samples flagged a problem — sub-audit fails on dissent.`);
+      } else {
+        log('AUDIT_SUB_CLEAN', `${sub.label}: clean across all ${CRITIC_SAMPLES} independent samples.`);
+      }
     }
 
-    // Optional additional hard gate. The critic above now runs its own project-appropriate
+    let status = anyIssue ? 'FAIL' : 'PASS';
+    let auditOutput = anyIssue
+      ? `Critic found issues in one or more sub-audits:${combinedFindings}`
+      : 'All three sub-audits (build/lint/test, hard constraints, baseline review) reported clean.';
+    fs.writeFileSync(AUDIT_FILE, auditOutput, 'utf8');
+
+    // Optional additional hard gate. The sub-audits above already run project-appropriate
     // verification, so this is only for when you want one specific deterministic command to
     // ALSO have to pass regardless of what the critic decided to run — not required, and
     // deliberately has no assumption about npm/any specific language baked in.
     if (status === 'PASS') {
       const verification = runVerification();
       if (verification.ran && !verification.passed) {
-        log('VERIFY_OVERRIDE', 'Critic said PASS but the ORCHESTRATOR_VERIFY_CMD command failed — overriding verdict to FAIL.');
+        log('VERIFY_OVERRIDE', 'All sub-audits reported clean but the ORCHESTRATOR_VERIFY_CMD command failed — overriding verdict to FAIL.');
         status = 'FAIL';
         auditOutput = `${auditOutput}\n\n## Verification Command Output (command failed after critic PASS)\n\n${verification.output}`;
         fs.writeFileSync(AUDIT_FILE, auditOutput, 'utf8');
