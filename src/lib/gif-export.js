@@ -13,7 +13,7 @@
  */
 
 import { isTransparent, arrowHeadPoints } from '$lib/annotations.js';
-import { putBinaryFile, putFile, getDefaultBranch } from './github.js';
+import { putBinaryFile, putFile, getDefaultBranch, rawFileUrl } from './github.js';
 import { generateImageId, buildMetadata, blobToBase64 } from './upload.js';
 
 /** @typedef {import('$lib/annotations.js').AnnotationShape} AnnotationShape */
@@ -325,7 +325,7 @@ export async function exportAndCommitGIF(octokit, owner, repo, slides, options =
 	const base64 = await blobToBase64(blob);
 	await putBinaryFile(octokit, owner, repo, gifPath, base64, `Export GIF ${id}`);
 
-	const gifUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${gifPath}`;
+	const gifUrl = rawFileUrl(owner, repo, branch, gifPath);
 
 	// Build metadata with sourceSlideIds
 	const sourceSlideIds = slides.map((s) => s.id);

@@ -1,4 +1,4 @@
-import { createClient, parseRepo, listDir, getFile, deleteFile, getDefaultBranch } from './github.js';
+import { createClient, parseRepo, listDir, getFile, deleteFile, getDefaultBranch, rawFileUrl } from './github.js';
 
 /**
  * @typedef {import('./github.js').OctokitInstance} OctokitInstance
@@ -64,7 +64,7 @@ export async function fetchGallery(token, repoString) {
 					branch,
 					jsonPath: jsonItem.path,
 					imagePath: `images/${metadata.filename}`,
-					rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${metadata.filename}`
+					rawUrl: rawFileUrl(owner, repo, branch, `images/${metadata.filename}`)
 				};
 				return entry;
 			} catch {

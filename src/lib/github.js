@@ -173,6 +173,20 @@ export async function deleteFile(octokit, owner, repo, path, sha, message) {
 }
 
 /**
+ * Build a raw.githubusercontent.com URL with proper URI encoding.
+ * Branch and path are encoded to handle special characters.
+ *
+ * @param {string} owner
+ * @param {string} repo
+ * @param {string} branch
+ * @param {string} path - file path within the repo, e.g. "images/abc123.png"
+ * @returns {string}
+ */
+export function rawFileUrl(owner, repo, branch, path) {
+	return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/${encodeURIComponent(path)}`;
+}
+
+/**
  * List the contents of a directory in the repo.
  * Returns an array of items with name, type, path, sha, etc.
  *

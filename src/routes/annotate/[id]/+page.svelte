@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import AnnotationEditor from '$lib/components/AnnotationEditor.svelte';
 	import { githubToken, githubRepo } from '$lib/stores.js';
-	import { createClient, parseRepo, getFile, putFile, getDefaultBranch } from '$lib/github.js';
+	import { createClient, parseRepo, getFile, putFile, getDefaultBranch, rawFileUrl } from '$lib/github.js';
 
 	let id = $derived($page.params.id);
 
@@ -52,7 +52,7 @@
 				...data,
 				jsonPath,
 				imagePath: `images/${data.filename}`,
-				rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/images/${data.filename}`,
+				rawUrl: rawFileUrl(owner, repo, branch, `images/${data.filename}`),
 				_sha: result.sha // store sha for updating
 			};
 

@@ -13,7 +13,7 @@
  * to rebuild a single index.json — the data model supports either approach.
  */
 
-import { putBinaryFile, putFile, getDefaultBranch } from './github.js';
+import { putBinaryFile, putFile, getDefaultBranch, rawFileUrl } from './github.js';
 
 /**
  * Generate a short random suffix (6 alphanumeric chars) for unique IDs.
@@ -210,7 +210,7 @@ export async function uploadImage(octokit, owner, repo, file, options = {}) {
 		`Add metadata for ${filename}`
 	);
 
-	const imageUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${imagePath}`;
+	const imageUrl = rawFileUrl(owner, repo, branch, imagePath);
 
 	return { id, imageUrl };
 }
