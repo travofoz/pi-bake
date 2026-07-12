@@ -202,25 +202,4 @@ export async function listDir(octokit, owner, repo, path) {
 	}));
 }
 
-/**
- * Get the SHA of the latest commit on the default branch.
- * Used as a reference for creating blobs/trees if needed.
- *
- * @param {OctokitInstance} octokit
- * @param {string} owner
- * @param {string} repo
- * @returns {Promise<string|null>}
- */
-export async function getLatestCommitSha(octokit, owner, repo) {
-	try {
-		const resp = await octokit.rest.repos.getCommit({
-			owner,
-			repo,
-			ref: 'HEAD'
-		});
-		return resp.data.sha;
-	} catch {
-		// Repo may be empty (no commits yet)
-		return null;
-	}
-}
+
