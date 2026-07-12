@@ -1,4 +1,4 @@
-import { a as unsubscribe_stores, i as store_get, v as escape_html } from "../../chunks/server.js";
+import { a as unsubscribe_stores, i as store_get, y as escape_html } from "../../chunks/server.js";
 import { n as isConnected, t as githubRepo } from "../../chunks/stores.js";
 //#region src/routes/+layout.svelte
 function _layout($$renderer, $$props) {
