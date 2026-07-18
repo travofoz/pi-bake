@@ -13,9 +13,9 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
-// Light grey panel background — match overlay style
-const PANEL_BG = "\x1b[48;2;220;220;225m";
-const RESET_BLACK = "\x1b[0m\x1b[38;2;20;20;20m";
+// Light grey panel background — 256-color for wider compatibility
+const PANEL_BG = "\x1b[48;5;254m";
+const RESET_BLACK = "\x1b[0m\x1b[38;5;16m";
 
 function wrapPanel(text: string): string {
 	return PANEL_BG + text + RESET_BLACK;

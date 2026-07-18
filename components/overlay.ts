@@ -22,13 +22,12 @@ export type ThemeProxy = {
 	bg: (variant: string, text: string) => string;
 };
 
-// Light grey panel background — gives the overlay a distinct floating surface
-const PANEL_BG = "\x1b[48;2;220;220;225m";
-// Black text reset for content on light bg
-const RESET_BLACK = "\x1b[0m\x1b[38;2;20;20;20m";
+// Light grey panel background — 256-color for wider compatibility
+const PANEL_BG = "\x1b[48;5;254m";  // very light grey
+// Reset + black text for readability on light bg
+const RESET_BLACK = "\x1b[0m\x1b[38;5;16m";
 
 function wrapPanel(text: string): string {
-	// Wrap in panel bg; ensure text is black-on-light
 	return PANEL_BG + text + RESET_BLACK;
 }
 
