@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container, Text, SelectList } from "@earendil-works/pi-tui";
-import { Border } from "../components/border.ts";
+import { Overlay } from "../components/overlay.ts";
 import { bakeCtx, getPhaseList } from "./ctx.ts";
 
 export function register(pi: ExtensionAPI): void {
@@ -45,9 +45,7 @@ export function register(pi: ExtensionAPI): void {
 
 			const selected = await cmdCtx.ui.custom<string | null>(
 				(_tui, theme, _kb, done) => {
-					const container = new Container();
-					container.addChild(new Border((s: string) => theme.fg("warning", s)));
-					container.addChild(new Text(theme.fg("warning", theme.bold("Skip Phase")), 1, 0));
+					const ov = new Overlay(theme, { title: "Skip Phase" });
 
 					const list = new SelectList(items, Math.min(items.length, 10), {
 						selectedPrefix: (s) => theme.fg("warning", s),
@@ -58,16 +56,12 @@ export function register(pi: ExtensionAPI): void {
 					});
 					list.onSelect = (v) => done(v);
 					list.onCancel = () => done(null);
-					container.addChild(list);
-
-					container.addChild(
-						new Text(theme.fg("dim", "↑↓ navigate  ·  enter skip  ·  esc cancel"), 1, 0),
-					);
-					container.addChild(new Border((s: string) => theme.fg("warning", s)));
+					ov.addBody(list);
+					ov.addFooter("↑↓ navigate  ·  enter skip  ·  esc cancel");
 
 					return {
-						render: (w) => container.render(w),
-						invalidate: () => container.invalidate(),
+						render: (w) => ov.render(w),
+						invalidate: () => ov.invalidate(),
 						handleInput: (data) => list.handleInput(data),
 					};
 				},

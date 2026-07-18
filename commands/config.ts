@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type SettingsListTheme, SettingsList, Container, Text } from "@earendil-works/pi-tui";
-import { Border } from "../components/border.ts";
+import { Overlay } from "../components/overlay.ts";
 import { bakeCtx, loadConfig, saveConfig } from "./ctx.ts";
 
 export function register(pi: ExtensionAPI): void {
@@ -35,9 +35,7 @@ export function register(pi: ExtensionAPI): void {
 
 			await cmdCtx.ui.custom<void>(
 				(_tui, theme, _kb, done) => {
-					const container = new Container();
-					container.addChild(new Border((s: string) => theme.fg("accent", s)));
-					container.addChild(new Text(theme.fg("accent", theme.bold("Bake Config")), 1, 0));
+					const ov = new Overlay(theme, { title: "Bake Config" });
 
 					const settingsTheme: SettingsListTheme = {
 						label: (s, _sel) => theme.fg("text", s),
@@ -54,9 +52,7 @@ export function register(pi: ExtensionAPI): void {
 							const updated = loadConfig();
 							(updated as any)[id] = newValue;
 							saveConfig(updated);
-							// Re-render widget
 							bakeCtx.requestWidgetRender?.();
-							// Update description for this item
 							const desc =
 								newValue === "full"
 									? "List all phases (tall — needs vertical space)"
@@ -69,20 +65,12 @@ export function register(pi: ExtensionAPI): void {
 						() => done(undefined),
 						{ enableSearch: false },
 					);
-					container.addChild(settingsList);
-
-					container.addChild(
-						new Text(
-							theme.fg("dim", "↑↓ navigate  ·  ← → / space change  ·  esc close"),
-							1,
-							0,
-						),
-					);
-					container.addChild(new Border((s: string) => theme.fg("accent", s)));
+					ov.addBody(settingsList);
+					ov.addFooter("↑↓ navigate  ·  ← → / space change  ·  esc close");
 
 					return {
-						render: (w) => container.render(w),
-						invalidate: () => container.invalidate(),
+						render: (w) => ov.render(w),
+						invalidate: () => ov.invalidate(),
 						handleInput: (data) => settingsList.handleInput?.(data),
 					};
 				},
