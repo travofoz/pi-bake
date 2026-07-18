@@ -1,19 +1,52 @@
 /**
- * Animated loader — KITT scanner in clean NFO-style chrome.
+ * Animated loader — KITT scanner in stacked braille style.
  *
- *   ──═[ ▉ Scanning... ]═───────────────────────────
- *   ─────────────────────────────────────────────────
+ *   ⣀⣠⣤⣴⣶⣷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣶⣴⣤⣠⣀
+ *   ──━━━━━━━━━━━━═══[ ▉ Scanning... ]═══━━━━━━━━━━━━──
+ *   ──━━━━━━━━━━━━═══════════════════════════━━━━━━━━━━━━──
+ *   ⣀⣠⣤⣴⣶⣷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣶⣴⣤⣠⣀
  *
  * Scanner char sweeps through ▏▎▍▌▋▊▉█.
- * Background: charcoal dark grey, 2-col terminal margin.
+ * Dark charcoal bg, 2-col terminal margin.
  */
 
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
-const CHARCOAL_BG = "\x1b[48;2;24;24;32m";
-function wrapBg(text: string): string {
-	return CHARCOAL_BG + text;
+// Light grey panel background — match overlay style
+const PANEL_BG = "\x1b[48;2;220;220;225m";
+const RESET_BLACK = "\x1b[0m\x1b[38;2;20;20;20m";
+
+function wrapPanel(text: string): string {
+	return PANEL_BG + text + RESET_BLACK;
+}
+
+const BRAILLE_STEPS = ["⣀","⣠","⣤","⣴","⣶","⣷","⣿","⣷","⣶","⣴","⣤","⣠","⣀"];
+
+function brailleGauss(width: number): string {
+	if (width <= 0) return "";
+	let s = "";
+	for (let i = 0; i < width; i++) {
+		const center = (width - 1) / 2;
+		const dist = Math.abs(i - center) / Math.max(1, center);
+		const idx = Math.round(dist * (BRAILLE_STEPS.length - 1));
+		s += BRAILLE_STEPS[Math.min(idx, BRAILLE_STEPS.length - 1)];
+	}
+	return s;
+}
+
+const TAPER_CHARS = ["─", "━", "═"];
+
+function taper(width: number): string {
+	if (width <= 0) return "";
+	let s = "";
+	for (let i = 0; i < width; i++) {
+		const center = (width - 1) / 2;
+		const dist = Math.abs(i - center) / Math.max(1, center);
+		const idx = Math.round((1 - dist) * (TAPER_CHARS.length - 1));
+		s += TAPER_CHARS[Math.max(0, Math.min(idx, TAPER_CHARS.length - 1))];
+	}
+	return s;
 }
 
 const SCANNER_FRAMES = ["▏","▎","▍","▌","▋","▊","▉","█","▉","▊","▋","▌","▍","▎","▏"];
@@ -47,26 +80,35 @@ export class LoaderComponent implements Component {
 		const msg = this.getMsg();
 		const t = this.fg;
 		const a = (s: string) => t("accent", s);
+		const dim = (s: string) => t("dim", s);
 
 		const margin = 2;
 		const innerW = Math.max(28, w - margin * 2);
-
-		// ── Top rule with scanner + message ──
-		const content = `${t("accent", scanner)} ${t("text", msg)}`;
-		const titleStr = `═[ ${content} ]`;
-		const titleVis = visibleWidth(titleStr);
-		const dashes = Math.max(0, innerW - titleVis);
-		const topRule = a("──" + titleStr + "═".repeat(dashes));
-
-		// ── Bottom rule ──
-		const botRule = a("──═".repeat(Math.ceil(innerW / 3)).slice(0, innerW));
-
 		const left = " ".repeat(margin);
 		const right = (line: string) => " ".repeat(Math.max(0, w - margin - visibleWidth(line) - margin));
 
+		// Braille gradient top
+		const braiDim = dim(brailleGauss(innerW));
+
+		// Top taper rule with scanner message
+		const content = `${t("accent", scanner)} ${t("text", msg)}`;
+		const titleStr = `═[ ${content} ]`;
+		const titleVis = visibleWidth(titleStr);
+		const leftW = Math.floor((innerW - titleVis) / 2);
+		const rightW = innerW - titleVis - leftW;
+		const topRule = a(taper(leftW) + titleStr + taper(rightW));
+
+		// Bottom taper rule
+		const botRule = a(taper(innerW));
+
+		// Braille gradient bottom
+		const braiBot = dim(brailleGauss(innerW));
+
 		return [
-			wrapBg(left + topRule + right(topRule)),
-			wrapBg(left + botRule + right(botRule)),
+			wrapPanel(left + braiDim + right(braiDim)),
+			wrapPanel(left + topRule + right(topRule)),
+			wrapPanel(left + botRule + right(botRule)),
+			wrapPanel(left + braiBot + right(braiBot)),
 		];
 	}
 
