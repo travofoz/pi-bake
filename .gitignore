@@ -1,7 +1,10 @@
+.bake/events.jsonl
+.bake/state.json
+.bake/completed/
+.bake/workspace/
+.bake/creed.md
 node_modules/
-build/
-.svelte-kit/
-.env
-.env.local
-*.log
-.DS_Store
+
+# Runtime symlinks (created by bake on session_start)
+/phases
+/workspace

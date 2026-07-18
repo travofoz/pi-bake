@@ -1,9 +1,0 @@
-{
-  "currentPhase": null,
-  "currentAttempt": 0,
-  "maxAttempts": 3,
-  "status": "idle",
-  "completedPhases": [],
-  "skippedPhases": [],
-  "pendingSteer": null
-}
