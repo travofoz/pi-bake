@@ -89,8 +89,36 @@ export default function (pi: ExtensionAPI) {
 
 		const t = ctx.ui.theme;
 
-		// ── Widget: multi-line phase progress panel ──
-		// No animation timers — updates driven solely by onStateChange
+		// ── Braille KITT scanner: replace pi's default working indicator ──
+		// Fat in middle, narrow at ends — sweeps LTR like Knight Rider
+		{
+			const W = 24;
+			// Braille fill levels from dimmest to brightest
+			const B = ["⠀", "⡀", "⡠", "⡦", "⡶", "⣶", "⣿"];
+			const frames: string[] = [];
+			const makeFrame = (pos: number) => {
+				const cells: string[] = [];
+				for (let i = 0; i < W; i++) {
+					const dist = Math.abs(i - pos);
+					// Spread depends on position: wider near center, narrower at edges
+					const centerFactor = 1 - Math.abs(pos - (W - 1) / 2) / ((W - 1) / 2);
+					const spread = 2 + Math.floor(centerFactor * 4); // 2-6 cells wide
+					const b = Math.max(0, Math.min(6, spread - dist));
+					const braille = B[b];
+					// Color: bright head = accent, dim falloff = muted, track = dim
+					const color =
+						b >= 5 ? "accent" :
+						b >= 3 ? "muted" :
+						b >= 1 ? "dim" : "muted";
+					cells.push(t.fg(color, braille));
+				}
+				return cells.join("");
+			};
+			// Sweep right → left
+			for (let p = 0; p < W; p++) frames.push(makeFrame(p));
+			for (let p = W - 2; p > 0; p--) frames.push(makeFrame(p));
+			ctx.ui.setWorkingIndicator({ frames, intervalMs: 60 });
+		}
 
 		const renderWidget = () => {
 			const cfg = loadConfig();
