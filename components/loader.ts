@@ -1,12 +1,11 @@
 /**
- * Animated loader — KITT scanner in ACiD/Remorse-style chrome.
+ * Animated loader — KITT scanner in clean NFO-style chrome.
  *
- *   ╔══════════════════════════════════════════════════╗
- *   ║▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░▓░║
- *   ╤───────────────────═[ ▉ Loading... ]═──────────────╤
- *   ║▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░║
- *   ╠──────────────────────────────────────────────────╣
- *   ╚══════════════════════════════════════════════════╝
+ *   ──═[ ▉ Scanning... ]═───────────────────────────
+ *   ─────────────────────────────────────────────────
+ *
+ * Scanner char sweeps through ▏▎▍▌▋▊▉█.
+ * Background: charcoal dark grey, 2-col terminal margin.
  */
 
 import type { Component, TUI } from "@earendil-works/pi-tui";
@@ -48,53 +47,26 @@ export class LoaderComponent implements Component {
 		const msg = this.getMsg();
 		const t = this.fg;
 		const a = (s: string) => t("accent", s);
-		const d = (s: string) => t("dim", s);
 
 		const margin = 2;
 		const innerW = Math.max(28, w - margin * 2);
 
-		// Content: scanner char + message
+		// ── Top rule with scanner + message ──
 		const content = `${t("accent", scanner)} ${t("text", msg)}`;
-		const contentVis = visibleWidth(content);
-
-		// Header dither
-		const ditherRow = () => {
-			let row = "";
-			for (let i = 0; i < innerW - 2; i++) {
-				row += (["▓","░","▓","░","▓","░"])[i % 6];
-			}
-			return a("║") + d(row) + a("║");
-		};
-
-		// Title row: ╤───═[ ▉ Loading... ]═─────────╤
-		const titleStr = `─═[ ${content} ]═`;
+		const titleStr = `═[ ${content} ]`;
 		const titleVis = visibleWidth(titleStr);
-		const dashes = Math.max(0, innerW - 2 - titleVis);
-		const leftD = Math.floor(dashes / 2);
-		const rightD = dashes - leftD;
-		const titleRow = a("╤") + d("─".repeat(leftD)) + titleStr + d("─".repeat(rightD)) + a("╤");
+		const dashes = Math.max(0, innerW - titleVis);
+		const topRule = a("──" + titleStr + "═".repeat(dashes));
 
-		// Shade row
-		const shadeRow = () => {
-			let row = "";
-			for (let i = 0; i < innerW - 2; i++) {
-				const dist = Math.abs(i - Math.floor((innerW - 2) / 2));
-				const chars = ["▒","░","▒","▓","▒"];
-				row += chars[Math.min(dist, chars.length - 1) % chars.length];
-			}
-			return a("║") + d(row) + a("║");
-		};
+		// ── Bottom rule ──
+		const botRule = a("──═".repeat(Math.ceil(innerW / 3)).slice(0, innerW));
 
 		const left = " ".repeat(margin);
 		const right = (line: string) => " ".repeat(Math.max(0, w - margin - visibleWidth(line) - margin));
 
 		return [
-			wrapBg(left + a("╔" + "═".repeat(innerW - 2) + "╗") + right("╔" + "═".repeat(innerW - 2) + "╗")),
-			wrapBg(left + ditherRow() + right(ditherRow())),
-			wrapBg(left + titleRow + right(titleRow)),
-			wrapBg(left + shadeRow() + right(shadeRow())),
-			wrapBg(left + a("╠" + "─".repeat(innerW - 2) + "╣") + right("╠" + "─".repeat(innerW - 2) + "╣")),
-			wrapBg(left + a("╚" + "═".repeat(innerW - 2) + "╝") + right("╚" + "═".repeat(innerW - 2) + "╝")),
+			wrapBg(left + topRule + right(topRule)),
+			wrapBg(left + botRule + right(botRule)),
 		];
 	}
 
