@@ -1,18 +1,22 @@
 /**
- * Overlay wrapper — reusable chrome for all bake dialogs.
+ * Overlay wrapper — Remorse/ACiD-style ANSI chrome for bake dialogs.
  *
- * Provides:
- *   - Cool block-element border (▛▀▀▀▜ / ▙▄▄▄▟ with ▐ ▌ sides)
- *   - 2-column gap from terminal edges in all directions
- *   - Charcoal dark grey background (distinct from main terminal bg)
- *   - Optional title line
- *   - Optional footer hint line
+ * Multi-layered border architecture:
+ *   ╔══╤══╤══╤══╤══╤══╤══╤══╤══╤══╤══╤══╤══╤══╗
+ *   ║▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓║
+ *   ╟──┼──┼──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┼──┼──╢
+ *   ║▓░ ▄▄▄▄▄▄▄▄▄ ──═[ Bake Config ]═── ▄▄▄▄▄▄▄▄▄ ░▓║
+ *   ║▓░ █████████ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ █████████ ░▓║
+ *   ║▓░ ▀▀▀▀▀▀▀▀▀ ████████████████████ ▀▀▀▀▀▀▀▀▀ ░▓║
+ *   ║▓░ ░░░░░░░░░ ████████████████████ ░░░░░░░░░ ░▓║
+ *   ╟──┼──┼──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┼──┼──╢
+ *   ║▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓█▓║
+ *   ╠══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╣
+ *   ║    Widget mode: [full]                              ║
+ *   ║    ↑↓ navigate  ·  ← → change                      ║
+ *   ╚══════════════════════════════════════════════════════╝
  *
- * Usage:
- *   const ov = new Overlay(theme, { title: "Bake Config" });
- *   ov.addBody(new Text(...));
- *   ov.addFooter("↑↓ navigate  ·  esc close");
- *   // in render: return ov.render(w);
+ * Background: charcoal dark grey, 2-col terminal margin.
  */
 
 import { Container, Text, visibleWidth } from "@earendil-works/pi-tui";
@@ -22,26 +26,65 @@ export type ThemeProxy = {
 	bg: (variant: string, text: string) => string;
 };
 
-// ─── Block-element border characters ────────────────────────────────
-//  ▛▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▜
-//  ▌  content here                                     ▐
-//  ▌  more content                                     ▐
-//  ▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▟
+const CHARCOAL_BG = "\x1b[48;2;24;24;32m";
+function wrapBg(text: string): string {
+	return CHARCOAL_BG + text;
+}
 
-const CORNER_TL = "▛";
-const CORNER_TR = "▜";
-const CORNER_BL = "▙";
-const CORNER_BR = "▟";
-const HORIZ_TOP = "▀";
-const HORIZ_BOT = "▄";
-const VERT = "▐";
-const VERT_REV = "▌";
+// ─── Generators ─────────────────────────────────────────────────────
 
-// ─── Overlay background color ───────────────────────────────────────
-// Charcoal dark grey — distinct from the main terminal background
-const OVERLAY_BG = "toolPendingBg";
-const OVERLAY_BORDER_COLOR = "accent";
-const OVERLAY_TEXT_COLOR = "text";
+/** Alternating pattern */
+function alt(len: number, a = "█", b = "▓"): string {
+	let s = "";
+	for (let i = 0; i < len; i++) s += (i % 2 ? a : b);
+	return s;
+}
+
+/** Repeating column pattern */
+function columns(len: number, p: string[]): string {
+	let s = "";
+	for (let i = 0; i < len; i++) s += p[i % p.length];
+	return s;
+}
+
+/** Gaussian brightness falloff */
+function gauss(len: number, chars: string[] = [" ","░","▒","▓","█"]): string {
+	let s = "";
+	for (let i = 0; i < len; i++) {
+		const dist = Math.abs(i - (len - 1) / 2) / ((len - 1) / 2);
+		const idx = Math.max(0, Math.min(chars.length - 1, Math.round((1 - dist) * (chars.length - 1))));
+		s += chars[idx];
+	}
+	return s;
+}
+
+/** Dither noise line */
+function noise(len: number, density = 0.4, a = "▓", b = "░"): string {
+	let s = "";
+	for (let i = 0; i < len; i++) {
+		const h = (i * 7 + 13) & 7;
+		s += h < density * 8 ? a : b;
+	}
+	return s;
+}
+
+/** Block gradient: solid edges fade to empty center */
+function edgeGrad(len: number): string {
+	const g = ["█","▓","▒","░"," ","░","▒","▓","█"];
+	let s = "";
+	for (let i = 0; i < len; i++) {
+		s += g[i % g.length];
+	}
+	return s;
+}
+
+/** Zigzag */
+function zigzag(len: number): string {
+	const z = ["╱","╲","╱","╲","╱","╲","╱","╲"];
+	let s = "";
+	for (let i = 0; i < len; i++) s += z[i % z.length];
+	return s;
+}
 
 export class Overlay {
 	private theme: ThemeProxy;
@@ -64,93 +107,111 @@ export class Overlay {
 		this.footerLines.push(line);
 	}
 
-	/** Render the full overlay, auto-margined with 2-col gap */
 	render(fullW: number): string[] {
 		const margin = 2;
-		const innerW = Math.max(10, fullW - margin * 2);
+		const innerW = Math.max(24, fullW - margin * 2);
+		const bw = innerW - 2;
 		const t = this.theme;
-
-		// ── Render body content at inner width ──
-		const bodyLines = this.body.render(innerW - 2); // -2 for side borders
-
-		// ── Assemble lines ──
-		const topBorder = this.title
-			? this.makeTopBorder(innerW, t)
-			: this.makeRule(innerW, HORIZ_TOP, CORNER_TL, CORNER_TR, t);
-		const bottomBorder = this.makeRule(innerW, HORIZ_BOT, CORNER_BL, CORNER_BR, t);
-
+		const a = (s: string) => t.fg("accent", s);
+		const d = (s: string) => t.fg("dim", s);
 		const result: string[] = [];
 
-		// ── Top border ──
-		result.push(...topBorder);
+		// ══════════════════════════════════════════════════════════════
+		//  HEADER — thick ornate layered border
+		// ══════════════════════════════════════════════════════════════
 
-		// ── Title line (if any, between double top borders) ──
-		if (this.title) {
-			const titleLine = this.padCenter(this.title, innerW - 2);
-			result.push(this.borderLine(titleLine, innerW, t));
-			result.push(...this.makeRule(innerW, HORIZ_TOP, CORNER_TL, CORNER_TR, t));
+		// Row 1: Double top frame with corner accent
+		result.push(a("╔" + columns(bw, ["═","╤"])) + a("╗"));
+
+		// Row 2: Dither pillar
+		result.push(a("║") + d(alt(bw, "█", "▓")) + a("║"));
+
+		// Row 3: Zigzag transition
+		result.push(a("╟") + d(zigzag(bw)) + a("╢"));
+
+		// Row 4: Noise band
+		result.push(a("║") + d(noise(bw, 0.3, "▓", "░")) + a("║"));
+
+		// Row 5: Gaussian gradient band
+		result.push(a("║") + d(gauss(bw)) + a("║"));
+
+		// Row 6: Tee join + wave + title embedded
+		{
+			const waveW = Math.min(10, Math.floor(bw * 0.12));
+			if (this.title) {
+				const titleStr = `──═[ ${a(this.title)}${d(" ]═──")}`;
+				const titleVis = visibleWidth(titleStr);
+				const sideEach = Math.floor((bw - titleVis) / 2);
+				const wL = gauss(Math.min(waveW, sideEach));
+				const wR = gauss(Math.min(waveW, sideEach));
+				const dashL = Math.max(0, sideEach - visibleWidth(wL));
+				const dashR = Math.max(0, sideEach - visibleWidth(wR));
+				result.push(
+					a("╟") +
+					d(gauss(sideEach)) +
+					titleStr +
+					d(gauss(sideEach)) +
+					a("╢")
+				);
+			} else {
+				result.push(a("╟") + d(gauss(bw)) + a("╢"));
+			}
 		}
 
-		// ── Body ──
+		// Row 7: Second noise band
+		result.push(a("║") + d(noise(bw, 0.4, "▒", " ")) + a("║"));
+
+		// Row 8: Edge gradient (solid→empty→solid)
+		result.push(a("║") + d(edgeGrad(bw)) + a("║"));
+
+		// Row 9: Reverse dither pillar
+		result.push(a("╟") + d(alt(bw, "▓", "█")) + a("╢"));
+
+		// Row 10: Divider
+		result.push(a("╠" + columns(bw, ["═","╧"])) + a("╣"));
+
+		// ══════════════════════════════════════════════════════════════
+		//  BODY
+		// ══════════════════════════════════════════════════════════════
+		const bodyIndent = 4;
+		const bodyLines = this.body.render(bw - bodyIndent);
 		for (const line of bodyLines) {
-			const padded = line + " ".repeat(Math.max(0, innerW - 2 - visibleWidth(line)));
-			result.push(this.borderLine(padded, innerW, t));
+			const vis = visibleWidth(line);
+			const pad = Math.max(0, bw - bodyIndent - vis);
+			result.push(a("║") + " ".repeat(bodyIndent) + line + " ".repeat(pad) + a("║"));
 		}
 
-		// ── Footer hints ──
+		// ══════════════════════════════════════════════════════════════
+		//  FOOTER
+		// ══════════════════════════════════════════════════════════════
+		result.push(a("╠" + columns(bw, ["─","┴"])) + a("╣"));
+
+		// Pulse footer band
+		result.push(a("║") + d(gauss(bw, [" ","░","▒","▓","█","▓","▒","░"," "])) + a("║"));
+
 		for (const f of this.footerLines) {
-			const padded = t.fg("dim", f) + " ".repeat(Math.max(0, innerW - 2 - visibleWidth(f)));
-			result.push(this.borderLine(padded, innerW, t));
+			const vis = visibleWidth(f);
+			const pad = Math.max(0, bw - bodyIndent - vis);
+			result.push(a("║") + " ".repeat(bodyIndent) + t.fg("dim", f) + " ".repeat(pad) + a("║"));
 		}
 
-		// ── Bottom border ──
-		result.push(...bottomBorder);
+		// ══════════════════════════════════════════════════════════════
+		//  BOTTOM
+		// ══════════════════════════════════════════════════════════════
+		result.push(a("╚" + columns(bw, ["═","╧"])) + a("╝"));
 
-		// ── Pad to full width with charcoal bg, preserving 2-col margin ──
-		const bg = (s: string) => t.bg(OVERLAY_BG, s);
+		// ══════════════════════════════════════════════════════════════
+		//  MARGIN + BG
+		// ══════════════════════════════════════════════════════════════
 		const leftPad = " ".repeat(margin);
-		return result.map((line) => bg(leftPad + line + " ".repeat(Math.max(0, fullW - margin - visibleWidth(line) - margin))));
+		return result.map((line) => {
+			const vis = visibleWidth(line);
+			const rightPad = " ".repeat(Math.max(0, fullW - margin - vis - margin));
+			return wrapBg(leftPad + line + rightPad);
+		});
 	}
 
-	/** No-op by default — override if you have animated children */
 	invalidate(): void {
 		this.body.invalidate();
-	}
-
-	// ─── Private helpers ──────────────────────────────────────────
-
-	private makeTopBorder(w: number, t: ThemeProxy): string[] {
-		const title = ` ${this.title} `;
-		const leftW = Math.floor((w - 2 - title.length) / 2);
-		const rightW = w - 2 - title.length - leftW;
-
-		const left = HORIZ_TOP.repeat(leftW);
-		const right = HORIZ_TOP.repeat(rightW);
-		const top = t.fg(OVERLAY_BORDER_COLOR, `${CORNER_TL}${left}${t.fg("accent", title)}${right}${CORNER_TR}`);
-
-		const bg = (s: string) => t.bg(OVERLAY_BG, s);
-		const margin = 2;
-		return [bg(" ".repeat(margin) + top + " ".repeat(Math.max(0, w - margin - visibleWidth(top) - margin)))];
-	}
-
-	private makeRule(w: number, h: string, tl: string, tr: string, t: ThemeProxy): string[] {
-		const rule = t.fg(OVERLAY_BORDER_COLOR, `${tl}${h.repeat(w - 2)}${tr}`);
-		const bg = (s: string) => t.bg(OVERLAY_BG, s);
-		const margin = 2;
-		return [bg(" ".repeat(margin) + rule + " ".repeat(Math.max(0, w - margin - visibleWidth(rule) - margin)))];
-	}
-
-	private borderLine(content: string, w: number, t: ThemeProxy): string {
-		const left = t.fg(OVERLAY_BORDER_COLOR, VERT_REV);
-		const right = t.fg(OVERLAY_BORDER_COLOR, VERT);
-		return left + content + right;
-	}
-
-	private padCenter(s: string, target: number): string {
-		const vis = visibleWidth(s);
-		if (vis >= target) return s;
-		const left = Math.floor((target - vis) / 2);
-		const right = target - vis - left;
-		return " ".repeat(left) + s + " ".repeat(right);
 	}
 }

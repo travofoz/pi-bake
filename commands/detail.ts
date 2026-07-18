@@ -127,14 +127,17 @@ export function register(pi: ExtensionAPI): void {
 				(_tui, theme, _kb, done) => {
 					if (selectedIdx >= allPhases.length) selectedIdx = 0;
 
-					const ov = new Overlay(theme, { title: allPhases[selectedIdx] });
-					ov.addBody(buildBody(theme, selectedIdx, bake!.stateSnapshot));
-					ov.addFooter("↑↓ browse  ·  r retry  ·  s skip  ·  esc/q close");
+					const makeOv = () => {
+						const o = new Overlay(theme, { title: allPhases[selectedIdx] });
+						o.addBody(buildBody(theme, selectedIdx, bake!.stateSnapshot));
+						o.addFooter("↑↓ browse  ·  r retry  ·  s skip  ·  esc/q close");
+						return o;
+					};
+
+					let ov = makeOv();
 
 					const rebuild = () => {
-						// Rebuild overlay with new phase data
-						const body = buildBody(theme, selectedIdx, bake!.stateSnapshot);
-						ov.addBody(body);
+						ov = makeOv();
 					};
 
 					return {

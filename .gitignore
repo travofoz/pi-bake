@@ -8,3 +8,4 @@ node_modules/
 # Runtime symlinks (created by bake on session_start)
 /phases
 /workspace
+.bake/config.json
