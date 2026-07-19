@@ -11,6 +11,8 @@ export function register(pi: ExtensionAPI): void {
 			if (!bake) return;
 			const t = cmdCtx.ui.theme;
 
+			bakeCtx.widgetHidden = true;
+			try {
 			const confirmed = await cmdCtx.ui.custom<boolean>(
 				(tui, theme, _kb, done) => {
 					const ov = new Overlay(theme, { title: "⚠ Reset Bake Pipeline" });
@@ -47,6 +49,10 @@ export function register(pi: ExtensionAPI): void {
 				},
 				{ overlay: true },
 			);
+			} finally {
+				bakeCtx.widgetHidden = false;
+				bakeCtx.requestWidgetRender?.();
+			}
 
 			if (!confirmed) {
 				cmdCtx.ui.notify(t.fg("dim", "Reset cancelled"), "info");

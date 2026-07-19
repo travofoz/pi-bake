@@ -159,6 +159,8 @@ export function register(pi: ExtensionAPI): void {
 				return count;
 			};
 
+			bakeCtx.widgetHidden = true;
+			try {
 			await cmdCtx.ui.custom<void>(
 				(tui, theme, _kb, done) => {
 					if (selectedIdx >= allPhases.length) selectedIdx = 0;
@@ -230,6 +232,10 @@ export function register(pi: ExtensionAPI): void {
 				},
 				{ overlay: true },
 			);
+			} finally {
+				bakeCtx.widgetHidden = false;
+				bakeCtx.requestWidgetRender?.();
+			}
 		},
 	});
 }

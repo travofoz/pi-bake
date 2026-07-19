@@ -110,9 +110,12 @@ export const bakeCtx: {
 	loaderMsg: string;
 	/** Triggers a TUI re-render (so widget Component picks up new state). Set by widget factory. */
 	requestWidgetRender: (() => void) | null;
+	/** When true, BakeWidget.render() returns empty (no widget visible). Toggled by overlay commands. */
+	widgetHidden: boolean;
 } = {
 	bake: null,
 	closeLoader: null,
 	loaderMsg: "",
 	requestWidgetRender: null,
+	widgetHidden: false,
 };

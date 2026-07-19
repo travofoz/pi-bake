@@ -62,6 +62,8 @@ class BakeWidget implements Component {
 
 	render(width: number): string[] {
 		const t = this.theme;
+		// Bail if overlay is open (widget hidden by overlay commands)
+		if (bakeCtx.widgetHidden) return [];
 		const cfg = loadConfig();
 		if (cfg.widgetMode === "hidden") return [];
 

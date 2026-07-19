@@ -43,6 +43,8 @@ export function register(pi: ExtensionAPI): void {
 				description: p === state.currentPhase ? "Currently running phase" : undefined,
 			}));
 
+			bakeCtx.widgetHidden = true;
+			try {
 			const selected = await cmdCtx.ui.custom<string | null>(
 				(tui, theme, _kb, done) => {
 					const ov = new Overlay(theme, { title: "Skip Phase" });
@@ -68,6 +70,10 @@ export function register(pi: ExtensionAPI): void {
 				},
 				{ overlay: true },
 			);
+			} finally {
+				bakeCtx.widgetHidden = false;
+				bakeCtx.requestWidgetRender?.();
+			}
 
 			if (selected) {
 				bake.skipPhase(selected);

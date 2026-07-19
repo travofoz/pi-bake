@@ -33,6 +33,9 @@ export function register(pi: ExtensionAPI): void {
 				},
 			];
 
+			// Hide widget while overlay is open (avoids render conflicts)
+			bakeCtx.widgetHidden = true;
+			try {
 			await cmdCtx.ui.custom<void>(
 				(tui, theme, _kb, done) => {
 					const ov = new Overlay(theme, { title: "Bake Config" });
@@ -77,6 +80,10 @@ export function register(pi: ExtensionAPI): void {
 				},
 				{ overlay: true },
 			);
+			} finally {
+				bakeCtx.widgetHidden = false;
+				bakeCtx.requestWidgetRender?.();
+			}
 		},
 	});
 }

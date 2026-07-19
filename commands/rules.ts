@@ -48,6 +48,8 @@ export function register(pi: ExtensionAPI): void {
 				values: ["on", "off"],
 			}));
 
+			bakeCtx.widgetHidden = true;
+			try {
 			await cmdCtx.ui.custom<void>(
 				(tui, theme, _kb, done) => {
 					const ov = new Overlay(theme, { title: "ast-grep Rules" });
@@ -82,6 +84,10 @@ export function register(pi: ExtensionAPI): void {
 				},
 				{ overlay: true },
 			);
+			} finally {
+				bakeCtx.widgetHidden = false;
+				bakeCtx.requestWidgetRender?.();
+			}
 		},
 	});
 }
