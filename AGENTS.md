@@ -21,6 +21,9 @@ to just run.
 status so I know what's committed without scrolling the buffer. Example:
 `→ committed to master (abc1234)`
 
+**Git single-command.** Do `git add . && git commit -m '...'` in one bash
+call — no separate add, no waiting for confirmation. Keep it tight.
+
 **Default branch is `master`**, not `main`.
 
 **Name the state.** I'm on a phone screen inside a tmux pane inside an
