@@ -91,21 +91,15 @@ export default function (pi: ExtensionAPI) {
 
 		const t = ctx.ui.theme;
 
-		// ── Braille KITT scanner: full-width centered, "working" text ──
-		// Sweeps from center outward (in→out, mirrored) like the taper lines
-		{
-			const W = 30; // braille cells per side
+		// ── Responsive frame builder for working indicator ──
+		const buildWorkingFrames = (cols: number) => {
+			const W = Math.max(8, Math.floor((cols - 20) / 2)); // braille cells per side
 			const B = ["⠀", "⡀", "⡠", "⡦", "⡶", "⣶", "⣿"];
 			const label = "  ⚙ working...";
-			const labelW = visibleWidth(label);
 			const frames: string[] = [];
-			const totalW = 68; // full frame width
-
 			const makeFrame = (spreadPos: number) => {
-				// spreadPos: 0 = at center (near label), W = at outer edge
-				const leftPos = W - 1 - spreadPos; // left side: inner→outer = right→left
-				const rightPos = spreadPos; // right side: inner→outer = left→right
-
+				const leftPos = W - 1 - spreadPos;
+				const rightPos = spreadPos;
 				const buildSide = (pos: number, len: number): string => {
 					const cells: string[] = [];
 					for (let i = 0; i < len; i++) {
@@ -113,29 +107,28 @@ export default function (pi: ExtensionAPI) {
 						const centerFactor = 1 - Math.abs(pos - (len - 1) / 2) / ((len - 1) / 2);
 						const spread = 2 + Math.floor(centerFactor * 4);
 						const b = Math.max(0, Math.min(6, spread - dist));
-						const braille = B[b];
-						const color =
-							b >= 5 ? "accent" :
-							b >= 3 ? "muted" :
-							b >= 1 ? "dim" : "muted";
-						cells.push(t.fg(color, braille));
+						cells.push(t.fg(
+							b >= 5 ? "accent" : b >= 3 ? "muted" : b >= 1 ? "dim" : "muted",
+							B[b],
+						));
 					}
 					return cells.join("");
 				};
-
 				const leftScan = buildSide(leftPos, W);
 				const rightScan = buildSide(rightPos, W);
 				const content = leftScan + t.fg("accent", label) + rightScan;
-				const contentW = visibleWidth(content);
-				const pad = Math.max(0, Math.floor((totalW - contentW) / 2));
-				return " ".repeat(pad) + content + " ".repeat(totalW - pad - contentW);
+				const cw = visibleWidth(content);
+				const pad = Math.max(0, Math.floor((cols - cw) / 2));
+				return " ".repeat(pad) + content + " ".repeat(cols - pad - cw);
 			};
-
-			// Sweep: center → edges → center
 			for (let p = 0; p < W; p++) frames.push(makeFrame(p));
 			for (let p = W - 2; p >= 0; p--) frames.push(makeFrame(p));
-			ctx.ui.setWorkingIndicator({ frames, intervalMs: 60 });
-		}
+			return frames;
+		};
+
+		// ── Initial working indicator at current terminal width ──
+		let lastWorkingCols = process.stdout.columns || 80;
+		ctx.ui.setWorkingIndicator({ frames: buildWorkingFrames(lastWorkingCols), intervalMs: 60 });
 
 		// ── Widget header scanner animation ──
 		let widgetScanPos = 0;
@@ -144,6 +137,12 @@ export default function (pi: ExtensionAPI) {
 			widgetScanPos += widgetScanDir * 0.025;
 			if (widgetScanPos >= 1) { widgetScanPos = 1; widgetScanDir = -1; }
 			if (widgetScanPos <= 0) { widgetScanPos = 0; widgetScanDir = 1; }
+			// Check for terminal resize
+			const cur = process.stdout.columns || 80;
+			if (Math.abs(cur - lastWorkingCols) >= 4) {
+				lastWorkingCols = cur;
+				ctx.ui.setWorkingIndicator({ frames: buildWorkingFrames(cur), intervalMs: 60 });
+			}
 			bakeCtx.requestWidgetRender?.();
 		}, 50);
 
@@ -186,7 +185,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			// Full mode — animated pink/green scanner header + phase list
-			const header = scannerTaper(40, widgetScanPos, t, "bake");
+			const cols = process.stdout.columns || 80;
+			const headerW = Math.max(30, cols - 4);
+			const header = scannerTaper(headerW, widgetScanPos, t, "bake");
 			const phaseLines = allPhases.map((phase) => {
 				if (state.completedPhases.includes(phase)) {
 					return ` ${t.fg("success", "✓")} ${t.fg("muted", phase)}`;
