@@ -12,8 +12,9 @@ export function register(pi: ExtensionAPI): void {
 			const t = cmdCtx.ui.theme;
 
 			bakeCtx.widgetHidden = true;
+			let confirmed = false;
 			try {
-			const confirmed = await cmdCtx.ui.custom<boolean>(
+			confirmed = await cmdCtx.ui.custom<boolean>(
 				(tui, theme, _kb, done) => {
 					const ov = new Overlay(theme, { title: "⚠ Reset Bake Pipeline" });
 
@@ -38,7 +39,7 @@ export function register(pi: ExtensionAPI): void {
 						render: (w) => ov.render(w),
 						invalidate: () => ov.invalidate(),
 						handleInput: (data: string) => {
-							if (data === "enter" || data === "\r") {
+							if (data === "enter" || data === "\r" || data === "\n" || data === "y") {
 								done(true);
 							} else {
 								done(false);
