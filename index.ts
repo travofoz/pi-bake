@@ -89,21 +89,30 @@ export default function (pi: ExtensionAPI) {
 
 		const t = ctx.ui.theme;
 
-		// ── Working indicator: single continuous braille track, full width ──
-		// Two bright spots sweep from center outward (in→out, mirrored) across one track.
+		// ── Working indicator: single red KITT scanner, full width ──
+		// Red bright spot sweeps left→right→left on green braille track.
+		const RED_B = "\x1b[38;5;196m";
+		const RED_M = "\x1b[38;5;160m";
+		const RED_D = "\x1b[38;5;88m";
+		const GRN_D = "\x1b[38;5;65m";
+		const RST = "\x1b[0m";
 		const buildWorkingFrames = (cols: number) => {
 			const W = Math.max(8, cols - 3);
 			const B = ["⠀", "⡀", "⡠", "⡦", "⡶", "⣶", "⣿"];
 			const frames: string[] = [];
-			const makeFrame = (spread: number) => {
-				const ct = (W - 1) / 2;
-				const leftScan = Math.round(ct - spread * ct);
-				const rightScan = Math.round(ct + spread * ct);
+			const makeFrame = (spot: number) => {
 				const cells: string[] = [];
 				for (let i = 0; i < W; i++) {
-					const minDist = Math.min(Math.abs(i - leftScan), Math.abs(i - rightScan));
-					const b = minDist <= 1 ? 6 : minDist <= 3 ? 4 : minDist <= 6 ? 2 : 0;
-					cells.push(t.fg(minDist <= 3 ? "accent" : b >= 2 ? "muted" : "dim", B[b]));
+					const dist = Math.abs(i - Math.round(spot * (W - 1)));
+					const b = dist <= 1 ? 6 : dist <= 3 ? 4 : dist <= 6 ? 2 : 0;
+					if (dist <= 2) {
+						const c = dist <= 1 ? RED_B : RED_M;
+						cells.push(c + B[b] + RST);
+					} else if (dist <= 5) {
+						cells.push(RED_D + B[b] + RST);
+					} else {
+						cells.push(GRN_D + B[b] + RST);
+					}
 				}
 				return cells.join("");
 			};
@@ -114,17 +123,18 @@ export default function (pi: ExtensionAPI) {
 		};
 
 		// ── Initial working indicator at current terminal width ──
+		ctx.ui.setWorkingMessage("");
 		ctx.ui.setWorkingIndicator({
 			frames: buildWorkingFrames(process.stdout.columns || 80),
 			intervalMs: 60,
 		});
 
-		// ── Widget header: time-based scanner (no mutable timer state to desync) ──
+		// ── Widget header: time-based scanner (position from Date.now(), no desync) ──
 		const widgetStartTime = Date.now();
 		if (bakeCtx.widgetAnimTimer) clearInterval(bakeCtx.widgetAnimTimer);
 		bakeCtx.widgetAnimTimer = setInterval(() => {
 			bakeCtx.requestWidgetRender?.();
-		}, 1000);
+		}, 100);
 
 		const renderWidget = () => {
 			const cfg = loadConfig();

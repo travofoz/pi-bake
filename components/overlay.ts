@@ -36,9 +36,9 @@ function taperChars(width: number): string[] {
 	return chars;
 }
 
-const PINK_BRIGHT = "\x1b[38;5;213m";
-const PINK_MID = "\x1b[38;5;175m";
-const PINK_DIM = "\x1b[38;5;95m";
+const RED_BRIGHT = "\x1b[38;5;196m";
+const RED_MID = "\x1b[38;5;160m";
+const RED_DIM = "\x1b[38;5;88m";
 const GREEN_BRIGHT = "\x1b[38;5;119m";
 const GREEN_MID = "\x1b[38;5;108m";
 const GREEN_DIM = "\x1b[38;5;65m";
@@ -46,39 +46,33 @@ const RESET = "\x1b[0m";
 const WHITE_FG = "\x1b[38;5;255m";
 
 /** Color a character based on distance from scanner center. */
-function scannerColor(ch: string, distFromScan: number, leftSide: boolean): string {
-	// Scanner zone (3 cols wide): bright
-	// Fringe (4-6 cols): mid
-	// Rest: dim
-	const pink = distFromScan <= 1 ? PINK_BRIGHT : distFromScan <= 3 ? PINK_MID : PINK_DIM;
-	const green = distFromScan <= 1 ? GREEN_BRIGHT : distFromScan <= 3 ? GREEN_MID : GREEN_DIM;
-	const color = leftSide ? pink : green;
-	return `${color}${ch}${RESET}`;
+function scannerColor(ch: string, distFromScan: number, _leftSide: boolean): string {
+	// Scanner head uses red. Non-scanner zone uses green (both sides).
+	if (distFromScan <= 3) {
+		const red = distFromScan <= 1 ? RED_BRIGHT : distFromScan <= 2 ? RED_MID : RED_DIM;
+		return `${red}${ch}${RESET}`;
+	}
+	const green = distFromScan <= 5 ? GREEN_MID : GREEN_DIM;
+	return `${green}${ch}${RESET}`;
 }
 
-/** Build a single animated taper line with pink/green scanner sweep.
- *  Scanner spreads from center outward (in → out, mirrored). */
-export function scannerTaper(width: number, scanSpread: number, t: ThemeProxy, title?: string): string {
+/** Build a single animated taper line with red scanner on green track.
+ *  One bright spot sweeps from left to right and back (classic KITT). */
+export function scannerTaper(width: number, scanPos: number, t: ThemeProxy, title?: string): string {
 	if (width <= 0) return "";
 	const chars = taperChars(width);
-	const ct = (width - 1) / 2;
-	// scanSpread 0 = center, 1 = both edges
-	const leftScan = Math.round(ct - scanSpread * ct);
-	const rightScan = Math.round(ct + scanSpread * ct);
+	// scanPos 0..1: position of the single bright spot across the full width
+	const spot = Math.round(scanPos * (width - 1));
 
 	const colorLine = (lineChars: string[], offset: number): string => {
 		return lineChars.map((ch, i) => {
 			const absIdx = offset + i;
-			// Distance from the closer scanner
-			const distL = Math.abs(absIdx - leftScan);
-			const distR = Math.abs(absIdx - rightScan);
-			const minDist = Math.min(distL, distR);
-			if (minDist <= 6) {
-				const leftSide = absIdx <= ct;
-				return scannerColor(ch, minDist, leftSide);
+			const dist = Math.abs(absIdx - spot);
+			if (dist <= 5) {
+				return scannerColor(ch, dist, false);
 			}
-			const dim = absIdx <= ct ? PINK_DIM : GREEN_DIM;
-			return `${dim}${ch}${RESET}`;
+			// Non-scanner zone: green dim for all
+			return `${GREEN_DIM}${ch}${RESET}`;
 		}).join("");
 	};
 

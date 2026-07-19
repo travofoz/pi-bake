@@ -14,8 +14,8 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 // Light grey panel background — 256-color for wider compatibility
-const PANEL_BG = "\x1b[48;5;254m";
-const RESET_BLACK = "\x1b[0m\x1b[38;5;16m";
+const PANEL_BG = "\x1b[48;5;234m";
+const RESET_BLACK = "\x1b[0m\x1b[38;5;255m";
 
 function wrapPanel(text: string): string {
 	return PANEL_BG + text + RESET_BLACK;
@@ -76,10 +76,12 @@ export class LoaderComponent implements Component {
 	invalidate() {}
 
 	render(w: number): string[] {
+		const RED_B = "\x1b[38;5;196m";
+		const GRN_D = "\x1b[38;5;65m";
+		const RST = "\x1b[0m";
 		const scanner = SCANNER_FRAMES[this.scannerIdx];
 		const msg = this.getMsg();
 		const t = this.fg;
-		const a = (s: string) => t("accent", s);
 		const dim = (s: string) => t("dim", s);
 
 		const margin = 2;
@@ -87,22 +89,22 @@ export class LoaderComponent implements Component {
 		const left = " ".repeat(margin);
 		const right = (line: string) => " ".repeat(Math.max(0, w - margin - visibleWidth(line) - margin));
 
-		// Braille gradient top
-		const braiDim = dim(brailleGauss(innerW));
+		// Braille gradient top (green dim)
+		const braiGreen = GRN_D + brailleGauss(innerW) + RST;
 
-		// Top taper rule with scanner message
-		const content = `${t("accent", scanner)} ${t("text", msg)}`;
+		// Top taper rule with red scanner + msg
+		const content = `${RED_B}${scanner}${RST} ${dim(msg)}`;
 		const titleStr = `═[ ${content} ]`;
 		const titleVis = visibleWidth(titleStr);
 		const leftW = Math.floor((innerW - titleVis) / 2);
 		const rightW = innerW - titleVis - leftW;
-		const topRule = a(taper(leftW) + titleStr + taper(rightW));
+		const topRule = GRN_D + taper(leftW) + titleStr + taper(rightW) + RST;
 
-		// Bottom taper rule
-		const botRule = a(taper(innerW));
+		// Bottom taper rule (green dim)
+		const botRule = GRN_D + taper(innerW) + RST;
 
-		// Braille gradient bottom
-		const braiBot = dim(brailleGauss(innerW));
+		// Braille gradient bottom (green dim)
+		const braiBot = GRN_D + brailleGauss(innerW) + RST;
 
 		return [
 			wrapPanel(left + braiDim + right(braiDim)),
