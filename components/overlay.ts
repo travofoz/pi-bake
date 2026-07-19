@@ -106,11 +106,11 @@ export class Overlay {
 
 		if (this.tui) {
 			this.animTimer = setInterval(() => {
-				this.scanPos += this.scanDir * 0.06;
+				this.scanPos += this.scanDir * 0.10;
 				if (this.scanPos >= 1) { this.scanPos = 1; this.scanDir = -1; }
 				if (this.scanPos <= 0) { this.scanPos = 0; this.scanDir = 1; }
 				this.tui!.requestRender();
-			}, 40);
+			}, 33);
 		}
 	}
 
