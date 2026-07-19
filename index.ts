@@ -41,6 +41,7 @@ import {
 	getPhaseList,
 	loadConfig,
 } from "./commands/ctx.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { scannerTaper } from "./components/overlay.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -90,30 +91,49 @@ export default function (pi: ExtensionAPI) {
 
 		const t = ctx.ui.theme;
 
-		// ── Braille KITT scanner: replace pi's default working indicator ──
-		// Fat in middle, narrow at ends — sweeps LTR like Knight Rider
+		// ── Braille KITT scanner: full-width centered, "working" text ──
+		// Sweeps from center outward (in→out, mirrored) like the taper lines
 		{
-			const W = 24;
+			const W = 30; // braille cells per side
 			const B = ["⠀", "⡀", "⡠", "⡦", "⡶", "⣶", "⣿"];
+			const label = "  ⚙ working...";
+			const labelW = visibleWidth(label);
 			const frames: string[] = [];
-			const makeFrame = (pos: number) => {
-				const cells: string[] = [];
-				for (let i = 0; i < W; i++) {
-					const dist = Math.abs(i - pos);
-					const centerFactor = 1 - Math.abs(pos - (W - 1) / 2) / ((W - 1) / 2);
-					const spread = 2 + Math.floor(centerFactor * 4);
-					const b = Math.max(0, Math.min(6, spread - dist));
-					const braille = B[b];
-					const color =
-						b >= 5 ? "accent" :
-						b >= 3 ? "muted" :
-						b >= 1 ? "dim" : "muted";
-					cells.push(t.fg(color, braille));
-				}
-				return cells.join("");
+			const totalW = 68; // full frame width
+
+			const makeFrame = (spreadPos: number) => {
+				// spreadPos: 0 = at center (near label), W = at outer edge
+				const leftPos = W - 1 - spreadPos; // left side: inner→outer = right→left
+				const rightPos = spreadPos; // right side: inner→outer = left→right
+
+				const buildSide = (pos: number, len: number): string => {
+					const cells: string[] = [];
+					for (let i = 0; i < len; i++) {
+						const dist = Math.abs(i - pos);
+						const centerFactor = 1 - Math.abs(pos - (len - 1) / 2) / ((len - 1) / 2);
+						const spread = 2 + Math.floor(centerFactor * 4);
+						const b = Math.max(0, Math.min(6, spread - dist));
+						const braille = B[b];
+						const color =
+							b >= 5 ? "accent" :
+							b >= 3 ? "muted" :
+							b >= 1 ? "dim" : "muted";
+						cells.push(t.fg(color, braille));
+					}
+					return cells.join("");
+				};
+
+				const leftScan = buildSide(leftPos, W);
+				const rightScan = buildSide(rightPos, W);
+				const content = leftScan + t.fg("accent", label) + rightScan;
+				const contentW = visibleWidth(content);
+				const pad = Math.max(0, Math.floor((totalW - contentW) / 2));
+				return " ".repeat(pad) + content + " ".repeat(totalW - pad - contentW);
 			};
+
+			// Sweep: center → edges → center
 			for (let p = 0; p < W; p++) frames.push(makeFrame(p));
-			for (let p = W - 2; p > 0; p--) frames.push(makeFrame(p));
+			for (let p = W - 2; p >= 0; p--) frames.push(makeFrame(p));
 			ctx.ui.setWorkingIndicator({ frames, intervalMs: 60 });
 		}
 
