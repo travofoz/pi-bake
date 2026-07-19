@@ -92,10 +92,10 @@ export default function (pi: ExtensionAPI) {
 		const t = ctx.ui.theme;
 
 		// ── Responsive frame builder for working indicator ──
+		// Just the braille scanner — no label, no text. Pi's Loader already appends message.
 		const buildWorkingFrames = (cols: number) => {
-			const W = Math.max(8, Math.floor((cols - 20) / 2)); // braille cells per side
+			const W = Math.max(8, Math.floor((cols - 4) / 2)); // braille cells per side, full width
 			const B = ["⠀", "⡀", "⡠", "⡦", "⡶", "⣶", "⣿"];
-			const label = "  ⚙ working...";
 			const frames: string[] = [];
 			const makeFrame = (spreadPos: number) => {
 				const leftPos = W - 1 - spreadPos;
@@ -115,8 +115,9 @@ export default function (pi: ExtensionAPI) {
 					return cells.join("");
 				};
 				const leftScan = buildSide(leftPos, W);
+				// Mirror of left scan, not re-computed — reuse same cells reversed
 				const rightScan = buildSide(rightPos, W);
-				const content = leftScan + t.fg("accent", label) + rightScan;
+				const content = leftScan + "  " + rightScan;
 				const cw = visibleWidth(content);
 				const pad = Math.max(0, Math.floor((cols - cw) / 2));
 				return " ".repeat(pad) + content + " ".repeat(cols - pad - cw);
@@ -127,8 +128,10 @@ export default function (pi: ExtensionAPI) {
 		};
 
 		// ── Initial working indicator at current terminal width ──
-		let lastWorkingCols = process.stdout.columns || 80;
-		ctx.ui.setWorkingIndicator({ frames: buildWorkingFrames(lastWorkingCols), intervalMs: 60 });
+		// Clear the message text — pi's Loader appends it, we just want the animation
+		ctx.ui.setWorkingMessage("");
+		const initCols = process.stdout.columns || 80;
+		ctx.ui.setWorkingIndicator({ frames: buildWorkingFrames(initCols), intervalMs: 60 });
 
 		// ── Widget header scanner animation ──
 		let widgetScanPos = 0;
@@ -137,12 +140,6 @@ export default function (pi: ExtensionAPI) {
 			widgetScanPos += widgetScanDir * 0.025;
 			if (widgetScanPos >= 1) { widgetScanPos = 1; widgetScanDir = -1; }
 			if (widgetScanPos <= 0) { widgetScanPos = 0; widgetScanDir = 1; }
-			// Check for terminal resize
-			const cur = process.stdout.columns || 80;
-			if (Math.abs(cur - lastWorkingCols) >= 4) {
-				lastWorkingCols = cur;
-				ctx.ui.setWorkingIndicator({ frames: buildWorkingFrames(cur), intervalMs: 60 });
-			}
 			bakeCtx.requestWidgetRender?.();
 		}, 50);
 
