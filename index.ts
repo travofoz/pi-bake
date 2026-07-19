@@ -30,7 +30,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { Bake } from "./bake.ts";
 import { registerAll } from "./commands/index.ts";
-// widget animation removed — driven by state changes only
 import {
 	bakeCtx,
 	BAKE_BASE,
@@ -41,7 +40,6 @@ import {
 	getPhaseList,
 	loadConfig,
 } from "./commands/ctx.ts";
-import { visibleWidth } from "@earendil-works/pi-tui";
 import { scannerTaper } from "./components/overlay.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -91,14 +89,11 @@ export default function (pi: ExtensionAPI) {
 
 		const t = ctx.ui.theme;
 
-		// ── Responsive frame builder for working indicator ──
-		// Centered braille scanner with "working" label in middle.
-		// Frame width = cols - 1 so Loader's trailing space doesn't cause wrap.
+		// ── Responsive working indicator: mirrored braille scanner, no text ──
+		// Frame width = cols - 3 to fit Text's paddingX=1 on each side + Loader's trailing space.
 		const buildWorkingFrames = (cols: number) => {
-			const avail = cols - 1; // Loader adds a space after the frame
-			const label = "⚙ working";
-			const lw = visibleWidth(label);
-			const W = Math.max(6, Math.floor((avail - lw - 2) / 2)); // cells each side
+			const avail = Math.max(10, cols - 3);
+			const W = Math.max(4, Math.floor(avail / 2)); // each side: half of available
 			const B = ["⠀", "⡀", "⡠", "⡦", "⡶", "⣶", "⣿"];
 			const frames: string[] = [];
 			const makeFrame = (spreadPos: number) => {
@@ -119,9 +114,10 @@ export default function (pi: ExtensionAPI) {
 					return cells.join("");
 				};
 				const leftScan = buildSide(leftPos, W);
+				// Right scan mirrors left — just repeat same cells
 				const rightScan = buildSide(rightPos, W);
-				const content = leftScan + " " + t.fg("accent", label) + " " + rightScan;
-				const cw = visibleWidth(content);
+				const content = leftScan + " " + rightScan;
+				const cw = 2 * W + 1;
 				const pad = Math.max(0, Math.floor((avail - cw) / 2));
 				return " ".repeat(pad) + content + " ".repeat(avail - pad - cw);
 			};
@@ -131,7 +127,6 @@ export default function (pi: ExtensionAPI) {
 		};
 
 		// ── Initial working indicator at current terminal width ──
-		ctx.ui.setWorkingMessage(""); // suppress pi's appended message (label is in the frame)
 		const initCols = process.stdout.columns || 80;
 		ctx.ui.setWorkingIndicator({ frames: buildWorkingFrames(initCols), intervalMs: 60 });
 
@@ -140,11 +135,11 @@ export default function (pi: ExtensionAPI) {
 		let widgetScanDir = 1;
 		if (bakeCtx.widgetAnimTimer) clearInterval(bakeCtx.widgetAnimTimer);
 		bakeCtx.widgetAnimTimer = setInterval(() => {
-			widgetScanPos += widgetScanDir * 0.025;
+			widgetScanPos += widgetScanDir * 0.008;
 			if (widgetScanPos >= 1) { widgetScanPos = 1; widgetScanDir = -1; }
 			if (widgetScanPos <= 0) { widgetScanPos = 0; widgetScanDir = 1; }
 			bakeCtx.requestWidgetRender?.();
-		}, 50);
+		}, 150);
 
 		const renderWidget = () => {
 			const cfg = loadConfig();
