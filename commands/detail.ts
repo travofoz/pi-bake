@@ -159,11 +159,14 @@ export function register(pi: ExtensionAPI): void {
 						const specW = Math.max(12, cols - 6);
 						o.addBody(buildBody(theme, selectedIdx, bake!.stateSnapshot, sc, maxSpec, specW, mode, eventScroll));
 
-						const modeTag = mode === "phases" ? theme.fg("accent", "PHASES")
-							: mode === "events" ? theme.fg("accent", "EVENTS")
-							: "spec";
-						// Ultra-short legend that fits 40-col terminals: v:cyc j:dn k:up n/p:ph r:rt s:sk q:q
-						o.addFooter(`${modeTag} v:cyc j:dn k:up n/p:ph r:rt s:sk q:q`);
+						const modeTag = mode === "phases" ? theme.fg("accent", "PHS")
+							: mode === "events" ? theme.fg("accent", "EVT")
+							: "spc";
+						// Footer adapts to terminal width — fits down to ~40 cols
+						const legend = cols >= 48
+							? `v:cyc j:dn k:up n/p:ph r:rt s:sk q:q`
+							: `v j k n p r s q`;
+						o.addFooter(`${modeTag} ${legend}`);
 						return o;
 					};
 
