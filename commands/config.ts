@@ -35,7 +35,7 @@ export function register(pi: ExtensionAPI): void {
 
 			await cmdCtx.ui.custom<void>(
 				(tui, theme, _kb, done) => {
-					const ov = new Overlay(theme, { title: "Bake Config", tui });
+					const ov = new Overlay(theme, { title: "Bake Config" });
 
 					const settingsTheme: SettingsListTheme = {
 						label: (s, _sel) => theme.fg("text", s),

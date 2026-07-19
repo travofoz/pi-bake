@@ -106,14 +106,15 @@ export const getRuleFiles = (): string[] => {
 
 export const bakeCtx: {
 	bake: Bake | null;
-	requestWidgetRender: (() => void) | null;
 	closeLoader: (() => void) | null;
 	loaderMsg: string;
-	widgetAnimTimer: ReturnType<typeof setInterval> | null;
+	animTimer: ReturnType<typeof setInterval> | null;
+	/** Triggers a TUI re-render (so widget Component picks up new state). Set by widget factory. */
+	requestWidgetRender: (() => void) | null;
 } = {
 	bake: null,
-	requestWidgetRender: null,
 	closeLoader: null,
 	loaderMsg: "",
-	widgetAnimTimer: null,
+	animTimer: null,
+	requestWidgetRender: null,
 };

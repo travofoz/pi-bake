@@ -26,7 +26,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI } from "@earendil-works/pi-tui";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 
 import { Bake } from "./bake.ts";
 import { registerAll } from "./commands/index.ts";
@@ -40,13 +41,98 @@ import {
 	getPhaseList,
 	loadConfig,
 } from "./commands/ctx.ts";
-import { scannerTaper } from "./components/overlay.ts";
+import { scannerTaper, type ThemeProxy } from "./components/overlay.ts";
+
+// ThemeProxy has {fg, bg} — used by BakeWidget for scannerTaper / phase rendering
+type AnimTheme = ThemeProxy;
+
+// ─── Widget component (Component interface — rendered by TUI, no setWidget spam) ───
+class BakeWidget implements Component {
+	private theme: AnimTheme;
+	private phaseList: string[];
+	private startTime: number;
+
+	constructor(theme: AnimTheme, phaseList: string[]) {
+		this.theme = theme;
+		this.phaseList = phaseList;
+		this.startTime = Date.now();
+	}
+
+	invalidate() {}
+
+	render(width: number): string[] {
+		const t = this.theme;
+		const cfg = loadConfig();
+		if (cfg.widgetMode === "hidden") return [];
+
+		const state = bakeCtx.bake?.stateSnapshot;
+		if (!state) return [];
+		const allPhases = this.phaseList;
+		if (allPhases.length === 0) {
+			return [t.fg("dim", "Bake idle. Use /bake-start to begin.")];
+		}
+
+		if (cfg.widgetMode === "compact") {
+			const parts: string[] = [];
+			if (state.currentPhase) {
+				const a =
+					state.currentAttempt >= 0
+						? `(${Math.min(state.currentAttempt + 1, state.maxAttempts)}/${state.maxAttempts})`
+						: "";
+				parts.push(
+					`${t.fg("success", "●")} ${t.fg("accent", state.currentPhase)}${a ? ` ${t.fg("warning", a)}` : ""}`,
+				);
+			}
+			const done = state.completedPhases.length + state.skippedPhases.length;
+			const pending = allPhases.length - done;
+			if (state.completedPhases.length) parts.push(`${t.fg("success", `✓${state.completedPhases.length}`)}`);
+			if (state.skippedPhases.length) parts.push(`${t.fg("warning", `⏸${state.skippedPhases.length}`)}`);
+			if (pending > 0) parts.push(`${t.fg("dim", `○${pending}`)}`);
+			const label =
+				state.status === "idle"
+					? t.fg("dim", "idle")
+					: state.status === "done"
+						? t.fg("success", "done")
+						: state.status === "failed"
+							? t.fg("error", "failed")
+							: t.fg("accent", state.status);
+			parts.push(label);
+			return [parts.join("  ")];
+		}
+
+		// Full mode — time-based scanner header (position from Date.now(), cached phase list)
+		const elapsed = (Date.now() - this.startTime) / 1000;
+		const scanPos = Math.abs(Math.sin(elapsed * 1.2));
+		const header = scannerTaper(width - 2, scanPos, t, "bake");
+		const phaseLines = allPhases.map((phase) => {
+			if (state.completedPhases.includes(phase)) {
+				return ` ${t.fg("success", "✓")} ${t.fg("muted", phase)}`;
+			}
+			if (state.skippedPhases.includes(phase)) {
+				return ` ${t.fg("warning", "⏸")} ${t.fg("muted", phase)}`;
+			}
+			if (state.currentPhase === phase) {
+				const attempt =
+					state.currentAttempt >= 0
+						? ` (${Math.min(state.currentAttempt + 1, state.maxAttempts)}/${state.maxAttempts})`
+						: "";
+				return `${t.fg("success", "●")} ${t.fg("accent", phase)}${t.fg("warning", attempt)}`;
+			}
+			const doneCount = state.completedPhases.length + state.skippedPhases.length;
+			const idx = allPhases.indexOf(phase);
+			if (idx < doneCount) {
+				return ` ${t.fg("dim", "○")} ${t.fg("dim", phase)}`;
+			}
+			return ` ${t.fg("dim", "○")} ${t.fg("dim", phase)}`;
+		});
+		return [header, ...phaseLines];
+	}
+}
 
 export default function (pi: ExtensionAPI) {
-	// Register all 14 bake commands at module level (once per /reload, never duplicated)
 	registerAll(pi);
 
-	// ── session_start: initialize bake, widget, footer, status line ──
+	// ── session_start: one-time init ──
 	pi.on("session_start", async (_event, ctx) => {
 		bakeCtx.bake = new Bake(BAKE_BASE, WORKSPACE_DIR, RULES_DIR);
 
@@ -59,11 +145,8 @@ export default function (pi: ExtensionAPI) {
 			if (!fs.existsSync(wsLink)) {
 				fs.symlinkSync(WORKSPACE_DIR, wsLink, "dir");
 			}
-		} catch {
-			// non-fatal
-		}
+		} catch { /* non-fatal */ }
 
-		// Ensure phases dir exists + root symlink
 		if (!fs.existsSync(PHASES_DIR)) {
 			fs.mkdirSync(PHASES_DIR, { recursive: true });
 		}
@@ -72,25 +155,21 @@ export default function (pi: ExtensionAPI) {
 			if (!fs.existsSync(phLink)) {
 				fs.symlinkSync(PHASES_DIR, phLink, "dir");
 			}
-		} catch {
-			// non-fatal
-		}
+		} catch { /* non-fatal */ }
 
-		// Sanity-check: if state says running/paused but there's no active pipeline, reset to idle
+		// Sanity-check state
 		const initial = bakeCtx.bake.stateSnapshot;
 		if (!["idle", "done"].includes(initial.status)) {
 			const pendingPhases = getPhaseList().filter(
 				(p) => !initial.completedPhases.includes(p) && !initial.skippedPhases.includes(p),
 			);
-			if (pendingPhases.length === 0) {
-				bakeCtx.bake.resetState();
-			}
+			if (pendingPhases.length === 0) bakeCtx.bake.resetState();
 		}
 
 		const t = ctx.ui.theme;
+		const cachedPhaseList = getPhaseList();
 
-		// ── Working indicator: single red KITT scanner, full width ──
-		// Red bright spot sweeps left→right→left on green braille track.
+		// ── Working indicator: single red KITT scanner (60ms, independent of TUI render) ──
 		const RED_B = "\x1b[38;5;196m";
 		const RED_M = "\x1b[38;5;160m";
 		const RED_D = "\x1b[38;5;88m";
@@ -105,14 +184,9 @@ export default function (pi: ExtensionAPI) {
 				for (let i = 0; i < W; i++) {
 					const dist = Math.abs(i - Math.round(spot * (W - 1)));
 					const b = dist <= 1 ? 6 : dist <= 3 ? 4 : dist <= 6 ? 2 : 0;
-					if (dist <= 2) {
-						const c = dist <= 1 ? RED_B : RED_M;
-						cells.push(c + B[b] + RST);
-					} else if (dist <= 5) {
-						cells.push(RED_D + B[b] + RST);
-					} else {
-						cells.push(GRN_D + B[b] + RST);
-					}
+					if (dist <= 2) cells.push((dist <= 1 ? RED_B : RED_M) + B[b] + RST);
+					else if (dist <= 5) cells.push(RED_D + B[b] + RST);
+					else cells.push(GRN_D + B[b] + RST);
 				}
 				return cells.join("");
 			};
@@ -121,96 +195,31 @@ export default function (pi: ExtensionAPI) {
 			for (let i = steps - 1; i >= 0; i--) frames.push(makeFrame(i / steps));
 			return frames;
 		};
-
-		// ── Initial working indicator at current terminal width ──
 		ctx.ui.setWorkingMessage("");
 		ctx.ui.setWorkingIndicator({
 			frames: buildWorkingFrames(process.stdout.columns || 80),
 			intervalMs: 60,
 		});
 
-		// ── Widget header: time-based scanner (position from Date.now(), no desync) ──
-		const widgetStartTime = Date.now();
-		if (bakeCtx.widgetAnimTimer) clearInterval(bakeCtx.widgetAnimTimer);
-		bakeCtx.widgetAnimTimer = setInterval(() => {
-			bakeCtx.requestWidgetRender?.();
-		}, 100);
-
-		const renderWidget = () => {
-			const cfg = loadConfig();
-			if (cfg.widgetMode === "hidden") return [];
-
-			const state = bakeCtx.bake!.stateSnapshot;
-			const allPhases = getPhaseList();
-			if (allPhases.length === 0) {
-				return [t.fg("dim", "Bake idle. Use /bake-start to begin.")];
+		// ── Widget as a Component (TUI calls render() on each render cycle) ──
+		// The factory receives (tui, theme) — we store tui for the central animation timer
+		ctx.ui.setWidget(WIDGET_ID, (tui: TUI, theme: Theme) => {
+			// ── Central animation tick: ONE timer at 24fps ──
+			// Single requestRender() per frame. No individual timers anywhere.
+			if (!bakeCtx.animTimer) {
+				bakeCtx.animTimer = setInterval(() => {
+					tui.requestRender();
+				}, Math.round(1000 / 24)); // ~42ms = 24fps
 			}
 
-			if (cfg.widgetMode === "compact") {
-				const parts: string[] = [];
-				if (state.currentPhase) {
-					const a =
-						state.currentAttempt >= 0
-							? `(${Math.min(state.currentAttempt + 1, state.maxAttempts)}/${state.maxAttempts})`
-							: "";
-					parts.push(
-						`${t.fg("success", "●")} ${t.fg("accent", state.currentPhase)}${a ? ` ${t.fg("warning", a)}` : ""}`,
-					);
-				}
-				const done = state.completedPhases.length + state.skippedPhases.length;
-				const pending = allPhases.length - done;
-				if (state.completedPhases.length) parts.push(`${t.fg("success", `✓${state.completedPhases.length}`)}`);
-				if (state.skippedPhases.length) parts.push(`${t.fg("warning", `⏸${state.skippedPhases.length}`)}`);
-				if (pending > 0) parts.push(`${t.fg("dim", `○${pending}`)}`);
-				const label =
-					state.status === "idle"
-						? t.fg("dim", "idle")
-						: state.status === "done"
-							? t.fg("success", "done")
-							: state.status === "failed"
-								? t.fg("error", "failed")
-								: t.fg("accent", state.status);
-				parts.push(label);
-				return [parts.join("  ")];
-			}
+			// Expose render trigger for config changes, state resets, etc.
+			bakeCtx.requestWidgetRender = () => tui.requestRender();
 
-			// Full mode — time-based pink/green scanner header (no desync)
-			const cols = process.stdout.columns || 80;
-			const headerW = Math.max(30, cols - 4);
-			const elapsed = (Date.now() - widgetStartTime) / 1000;
-			const scanPos = Math.abs(Math.sin(elapsed * 1.2));
-			const header = scannerTaper(headerW, scanPos, t, "bake");
-			const phaseLines = allPhases.map((phase) => {
-				if (state.completedPhases.includes(phase)) {
-					return ` ${t.fg("success", "✓")} ${t.fg("muted", phase)}`;
-				}
-				if (state.skippedPhases.includes(phase)) {
-					return ` ${t.fg("warning", "⏸")} ${t.fg("muted", phase)}`;
-				}
-				if (state.currentPhase === phase) {
-					const attempt =
-						state.currentAttempt >= 0
-							? ` (${Math.min(state.currentAttempt + 1, state.maxAttempts)}/${state.maxAttempts})`
-							: "";
-					return `${t.fg("success", "●")} ${t.fg("accent", phase)}${t.fg("warning", attempt)}`;
-				}
-				const doneCount = state.completedPhases.length + state.skippedPhases.length;
-				const idx = allPhases.indexOf(phase);
-				if (idx < doneCount) {
-					return ` ${t.fg("dim", "○")} ${t.fg("dim", phase)}`;
-				}
-				return ` ${t.fg("dim", "○")} ${t.fg("dim", phase)}`;
-			});
-			return [header, ...phaseLines];
-		};
+			return new BakeWidget(theme, cachedPhaseList);
+		});
 
-		bakeCtx.requestWidgetRender = () => {
-			ctx.ui.setWidget(WIDGET_ID, renderWidget());
-		};
-
-		ctx.ui.setWidget(WIDGET_ID, renderWidget());
+		// ── State change handler (simplified — no widget re-set, central timer handles render) ──
 		bakeCtx.bake.onStateChange((s) => {
-			bakeCtx.requestWidgetRender?.();
 			if (s.status === "done" || s.status === "failed" || s.status === "idle") {
 				ctx.ui.setWorkingIndicator();
 				ctx.ui.setStatus("bake", t.fg("dim", "⏎ bake ready"));
@@ -225,7 +234,7 @@ export default function (pi: ExtensionAPI) {
 		bakeCtx.bake.onStatus((msg) => ctx.ui.setStatus("bake", t.fg("accent", t.bold(`● ${msg}`))));
 		ctx.ui.setStatus("bake", t.fg("dim", "⏎ bake ready"));
 
-		// ── Loader: track message updates ──
+		// ── Loader ──
 		bakeCtx.bake.onLoader((show, msg) => {
 			bakeCtx.loaderMsg = msg;
 			ctx.ui.setStatus("bake", t.fg("accent", t.bold(`● ${msg}`)));

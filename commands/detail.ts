@@ -166,11 +166,10 @@ export function register(pi: ExtensionAPI): void {
 					let ov: Overlay | null = null;
 
 					const makeOv = (sc: number) => {
-						if (ov) ov.dispose(); // stop old animation timer
+						if (ov) ov.dispose(); // dispose previous overlay (no timers — scan is time-computed)
 						const o = new Overlay(theme, {
 							title: allPhases[selectedIdx],
 							maxHeight: tui.terminal.rows,
-							tui, // wire up scanner animation
 						});
 						const overH = 10;
 						const maxSpec = Math.max(3, (tui.terminal.rows || 24) - overH);

@@ -45,7 +45,7 @@ export function register(pi: ExtensionAPI): void {
 
 			const selected = await cmdCtx.ui.custom<string | null>(
 				(tui, theme, _kb, done) => {
-					const ov = new Overlay(theme, { title: "Skip Phase", tui });
+					const ov = new Overlay(theme, { title: "Skip Phase" });
 
 					const list = new SelectList(items, Math.min(items.length, 10), {
 						selectedPrefix: (s) => theme.fg("warning", s),

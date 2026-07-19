@@ -50,7 +50,7 @@ export function register(pi: ExtensionAPI): void {
 
 			await cmdCtx.ui.custom<void>(
 				(tui, theme, _kb, done) => {
-					const ov = new Overlay(theme, { title: "ast-grep Rules", tui });
+					const ov = new Overlay(theme, { title: "ast-grep Rules" });
 
 					const settingsTheme: SettingsListTheme = {
 						label: (s, _sel) => theme.fg("text", s),

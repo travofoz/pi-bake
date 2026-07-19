@@ -8,8 +8,7 @@
  *   Dark grey bg, white text, 2-col margin.
  */
 
-import { Container, Text, visibleWidth } from "@earendil-works/pi-tui";
-import type { TUI } from "@earendil-works/pi-tui";
+import { Container, visibleWidth } from "@earendil-works/pi-tui";
 
 export type ThemeProxy = {
 	fg: (variant: string, text: string) => string;
@@ -91,27 +90,15 @@ export class Overlay {
 	private body: Container;
 	private footerLines: string[];
 	private maxHeight: number;
-	private tui?: TUI;
-	private scanPos = 0;
-	private scanDir = 1;
-	private animTimer?: ReturnType<typeof setInterval>;
+	private animStart: number;
 
-	constructor(theme: ThemeProxy, opts: { title?: string; maxHeight?: number; tui?: TUI } = {}) {
+	constructor(theme: ThemeProxy, opts: { title?: string; maxHeight?: number } = {}) {
 		this.theme = theme;
 		this.title = opts.title ?? "";
 		this.maxHeight = opts.maxHeight ?? 0;
-		this.tui = opts.tui;
 		this.body = new Container();
 		this.footerLines = [];
-
-		if (this.tui) {
-			this.animTimer = setInterval(() => {
-				this.scanPos += this.scanDir * 0.10;
-				if (this.scanPos >= 1) { this.scanPos = 1; this.scanDir = -1; }
-				if (this.scanPos <= 0) { this.scanPos = 0; this.scanDir = 1; }
-				this.tui!.requestRender();
-			}, 33);
-		}
+		this.animStart = Date.now();
 	}
 
 	addBody(component: { render: (w: number) => string[]; invalidate: () => void }): void {
@@ -123,7 +110,7 @@ export class Overlay {
 	}
 
 	dispose(): void {
-		if (this.animTimer) clearInterval(this.animTimer);
+		// No individual timer to clean — scan position is time-computed in render()
 	}
 
 	render(fullW: number): string[] {
@@ -133,8 +120,15 @@ export class Overlay {
 		const dim = (s: string) => t.fg("dim", s);
 		const result: string[] = [];
 
+		// ── Scanner position: time-based ping-pong (0→1→0), no timer needed ──
+		// Cycle matches original 0.66s full sweep
+		const elapsed = (Date.now() - this.animStart) / 1000;
+		const cycle = 0.66;
+		const phase = (elapsed % (cycle * 2)) / cycle;
+		const scanPos = phase <= 1 ? phase : 2 - phase;
+
 		// ── Top rule with animated scanner + title ──
-		result.push(scannerTaper(innerW, this.scanPos, t, this.title));
+		result.push(scannerTaper(innerW, scanPos, t, this.title));
 
 		result.push("");
 
@@ -155,7 +149,7 @@ export class Overlay {
 		if (this.footerLines.length > 0) result.push("");
 
 		// ── Bottom rule (mirrored scan) ──
-		result.push(scannerTaper(innerW, this.scanPos, t));
+		result.push(scannerTaper(innerW, scanPos, t));
 
 		// ── Cap to maxHeight if set ──
 		let capped = result;

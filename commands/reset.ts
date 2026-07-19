@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container, Text, Spacer } from "@earendil-works/pi-tui";
 import { Overlay } from "../components/overlay.ts";
-import { bakeCtx, WIDGET_ID } from "./ctx.ts";
+import { bakeCtx } from "./ctx.ts";
 
 export function register(pi: ExtensionAPI): void {
 	pi.registerCommand("bake-reset", {
@@ -13,7 +13,7 @@ export function register(pi: ExtensionAPI): void {
 
 			const confirmed = await cmdCtx.ui.custom<boolean>(
 				(tui, theme, _kb, done) => {
-					const ov = new Overlay(theme, { title: "⚠ Reset Bake Pipeline", tui });
+					const ov = new Overlay(theme, { title: "⚠ Reset Bake Pipeline" });
 
 					ov.addBody(new Text(theme.fg("warning", "This will destroy:"), 1, 0));
 					ov.addBody(new Text(theme.fg("text", "  • Workspace (build artifacts, node_modules)"), 2, 0));
@@ -56,7 +56,6 @@ export function register(pi: ExtensionAPI): void {
 			bake.clean();
 			cmdCtx.ui.setStatus("bake", t.fg("dim", "⏎ bake ready"));
 			bakeCtx.requestWidgetRender?.();
-			cmdCtx.ui.setWidget(WIDGET_ID, [t.fg("dim", "Bake idle. Use /bake-start to begin.")]);
 			cmdCtx.ui.notify(t.fg("success", "Bake pipeline reset"), "info");
 		},
 	});
