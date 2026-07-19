@@ -118,7 +118,7 @@ export class Overlay {
 		const innerW = Math.max(20, fullW - margin * 2);
 		const t = this.theme;
 		const dim = (s: string) => t.fg("dim", s);
-		const result: string[] = [];
+		let result: string[] = [];
 
 		// ── Scanner position: time-based ping-pong (0→1→0), no timer needed ──
 		// Cycle matches original 0.66s full sweep
