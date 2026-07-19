@@ -211,9 +211,8 @@ export function register(pi: ExtensionAPI): void {
 						render: (w: number) => ov.render(w),
 						invalidate: () => ov.invalidate(),
 						handleInput: (data: string) => {
-							if (matchesKey(data, "tab")) {
-								// Skip cycling in compact mode — only spec is available
-								if ((tui.terminal.rows || 24) < 25) return;
+							if (matchesKey(data, "tab") || data === "\t" || data === "tab") {
+								// In compact mode (<25 rows), makeOv clamps to spec-only — still cycle so it's not silently ignored
 								const cycle: ("phases" | "events" | "spec")[] = ["phases", "events", "spec"];
 								const idx = cycle.indexOf(mode);
 								mode = cycle[(idx + 1) % cycle.length];
