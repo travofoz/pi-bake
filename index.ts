@@ -203,12 +203,18 @@ export default function (pi: ExtensionAPI) {
 			intervalMs: 60,
 		});
 
-		// ── Widget as a Component (TUI calls render() on each render cycle) ──
-		// No animation timer — widget scanner updates only on user interaction or state changes.
-		// This avoids competing with overlays (settings, detail, etc.) for render cycles.
+		// ── Widget as a Component + gentle 8fps animation tick ──
+		// Timer skips when widgetHidden is set (bake overlay open) to avoid render contention.
+		// 8fps (125ms) is light enough to not choke input while keeping scanner visibly moving.
 		ctx.ui.setWidget(WIDGET_ID, (tui: TUI, theme: Theme) => {
-			// Expose render trigger for config changes, state resets, etc.
 			bakeCtx.requestWidgetRender = () => tui.requestRender();
+
+			// Gentle animation tick — skips when overlays hide the widget
+			if (!bakeCtx.animTimer) {
+				bakeCtx.animTimer = setInterval(() => {
+					if (!bakeCtx.widgetHidden) tui.requestRender();
+				}, 125); // 8fps
+			}
 
 			return new BakeWidget(theme, cachedPhaseList);
 		});
