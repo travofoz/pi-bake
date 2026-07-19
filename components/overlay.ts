@@ -65,7 +65,7 @@ export function scannerTaper(width: number, scanSpread: number, t: ThemeProxy, t
 	};
 
 	if (title) {
-		const titleStr = `═[ ${t.fg("text", title)} ]`;
+		const titleStr = `[ ${t.fg("text", title)} ]`;
 		const tv = visibleWidth(titleStr);
 		const lw = Math.floor((width - tv) / 2);
 		const rw = width - tv - lw;
