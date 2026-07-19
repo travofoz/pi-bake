@@ -24,6 +24,13 @@ status so I know what's committed without scrolling the buffer. Example:
 **Git single-command.** Do `git add . && git commit -m '...'` in one bash
 call — no separate add, no waiting for confirmation. Keep it tight.
 
+**Search tools.** Use `sg` (ast-grep) for AST-aware structural search over
+bare grep. Use `rg` (ripgrep) for regex/filename search. Skip plain grep.
+
+**Skills tight.** When loading a skill (ast-grep, librarian, etc.), keep it
+focused — load the bare minimum, don't dump the entire skill doc into
+context unless asked.
+
 **Default branch is `master`**, not `main`.
 
 **Name the state.** I'm on a phone screen inside a tmux pane inside an
