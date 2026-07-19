@@ -118,43 +118,39 @@ export class Overlay {
 		const innerW = Math.max(20, fullW - margin * 2);
 		const t = this.theme;
 		const dim = (s: string) => t.fg("dim", s);
-		let result: string[] = [];
 
 		// ── Scanner position: time-based ping-pong (0→1→0), no timer needed ──
-		// Cycle matches original 0.66s full sweep
 		const elapsed = (Date.now() - this.animStart) / 1000;
 		const cycle = 0.66;
 		const phase = (elapsed % (cycle * 2)) / cycle;
 		const scanPos = phase <= 1 ? phase : 2 - phase;
 
-		// ── Top rule with animated scanner + title ──
-		result.push(scannerTaper(innerW, scanPos, t, this.title));
-
-		result.push("");
-
-		// ── Body ──
 		const indent = 4;
-		const bodyLines = this.body.render(innerW - indent);
+		const topRule = scannerTaper(innerW, scanPos, t, this.title);
+		const bottomRule = scannerTaper(innerW, scanPos, t);
+
+		// Reserve space for frame elements so footer + bottom rule never get clipped
+		const footerCount = this.footerLines.length;
+		const overhead = 3 + (footerCount > 0 ? footerCount + 2 : 0); // top rule + empty line + bottom rule (+ footer lines + empty lines)
+		const bodyMax = this.maxHeight > 0 ? Math.max(0, this.maxHeight - overhead) : Infinity;
+
+		let bodyLines = this.body.render(innerW - indent);
+		if (bodyLines.length > bodyMax) {
+			bodyLines = bodyLines.slice(0, bodyMax);
+		}
+
+		const result: string[] = [];
+		result.push(topRule);
+		result.push("");
 		for (const line of bodyLines) {
 			result.push(" ".repeat(indent) + line);
 		}
-
-		if (this.footerLines.length > 0) result.push("");
-
-		// ── Footer ──
+		if (footerCount > 0) result.push("");
 		for (const f of this.footerLines) {
 			result.push(" ".repeat(indent) + dim(f));
 		}
-
-		if (this.footerLines.length > 0) result.push("");
-
-		// ── Bottom rule (mirrored scan) ──
-		result.push(scannerTaper(innerW, scanPos, t));
-
-		// ── Silent cap at maxHeight (no truncation marker) ──
-		if (this.maxHeight > 0 && result.length > this.maxHeight) {
-			result = result.slice(0, this.maxHeight);
-		}
+		if (footerCount > 0) result.push("");
+		result.push(bottomRule);
 
 		// ── Pad with dark grey bg + margin ──
 		const leftPad = " ".repeat(margin);
