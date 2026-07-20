@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { LoaderComponent } from "../components/loader.ts";
+import { showLoaderOverlay } from "../lib/overlay.ts";
 import { bakeCtx } from "./ctx.ts";
 
 export function register(pi: ExtensionAPI): void {
@@ -12,46 +12,14 @@ export function register(pi: ExtensionAPI): void {
 
 			cmdCtx.ui.setStatus("bake", t.fg("accent", "○ Starting pipeline..."));
 
-			// ── Show BorderedLoader overlay ──
-			let loaderDone: (() => void) | null = null;
 			bakeCtx.loaderMsg = "Starting pipeline...";
 
-			const loaderP = cmdCtx.ui.custom(
-				(tui, theme, _kb, done) => {
-					loaderDone = () => {
-						try {
-							done(undefined);
-						} catch {
-							/* already closed */
-						}
-					};
-					const comp = new LoaderComponent(tui, theme.fg.bind(theme), theme.bg.bind(theme), () => bakeCtx.loaderMsg);
-
-					return {
-						render: (w: number) => comp.render(w),
-						invalidate: () => {},
-						handleInput: (data: string) => {
-							if (data === "escape" || data === "q") {
-								bake?.abort();
-							}
-						},
-						dispose: () => {
-							comp.dispose();
-						},
-					};
-				},
-				{
-					overlay: true,
-					overlayOptions: {
-						anchor: "bottom-center",
-						margin: 1,
-					},
-					onHandle: (_handle) => {
-						bakeCtx.closeLoader = () => {
-							if (loaderDone) loaderDone();
-							loaderDone = null;
-						};
-					},
+			const overlay = showLoaderOverlay(
+				cmdCtx.ui,
+				() => bakeCtx.loaderMsg,
+				() => bake?.abort(),
+				() => {
+					bakeCtx.closeLoader = overlay.close;
 				},
 			);
 
@@ -60,13 +28,8 @@ export function register(pi: ExtensionAPI): void {
 			try {
 				await bake.runPipeline();
 			} finally {
-				if (loaderDone) {
-					loaderDone();
-					loaderDone = null;
-					bakeCtx.closeLoader = null;
-				}
-				// Ensure loaderP doesn't leak unhandled rejection if already resolved
-				loaderP.catch(() => {});
+				overlay.close();
+				bakeCtx.closeLoader = null;
 			}
 		},
 	});

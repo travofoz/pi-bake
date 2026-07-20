@@ -1,344 +1,168 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { LoaderComponent } from "../components/loader.ts";
+import { tryParseJSON } from "../lib/json-utils.ts";
+import { buildDecomposePrompt, buildReadmePrompt } from "../lib/prompts.ts";
+import { showLoaderOverlay } from "../lib/overlay.ts";
+import {
+	writeDagManifest,
+	writePhaseFiles,
+	writeContext,
+	archiveSpec,
+} from "../lib/phase-writer.ts";
 import { bakeCtx, BAKE_BASE, BAKE_DB_DIR, PHASES_DIR } from "./ctx.ts";
 
-// ── JSON repair helpers for fragile LLM output ─────────────────────────
-
 /**
- * Attempt to fix common JSON issues produced by LLMs:
- * 1. Trailing commas in arrays/objects
- * 2. Unescaped control characters in strings
- * 3. Single-quoted strings instead of double-quoted
- * 4. Missing closing brackets (truncation)
- * 5. Comments (// or /* style)
+ * Handler for /bake-spec-decompose.
+ *
+ * Orchestrates the decompose flow:
+ * 1. Validate args → read spec
+ * 2. Show loader overlay
+ * 3. Call LLM with decompose prompt
+ * 4. Parse/repair JSON response
+ * 5. Write phase files, DAG manifest, context
+ * 6. Archive source spec if needed
+ * 7. Fire-and-forget README generation
  */
-function repairJSON(raw: string): string {
-	let s = raw.trim();
+async function handleDecompose(
+	args: string | undefined,
+	cmdCtx: any,
+): Promise<void> {
+	const bake = bakeCtx.bake;
+	if (!bake) {
+		cmdCtx.ui.notify(cmdCtx.ui.theme.fg("error", "Bake not initialized"), "info");
+		return;
+	}
+	const t = cmdCtx.ui.theme;
 
-	// Strip markdown code fence if present
-	s = s.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-
-	// Strip any leading text before the first {
-	const braceIdx = s.indexOf("{");
-	if (braceIdx > 0) s = s.slice(braceIdx);
-
-	// Remove single-line comments (// ...)
-	s = s.replace(/\/\/[^\n]*/g, "");
-
-	// Remove multi-line comments (/* ... */)
-	s = s.replace(/\/\*[\s\S]*?\*\//g, "");
-
-	// Replace single quotes at string boundaries with double quotes
-	// Match: 'key': or : 'value' patterns — conservative to avoid breaking embedded apostrophes
-	s = s.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'\s*:/g, '"$1":');
-	s = s.replace(/"\s*:\s*'([^'\\]*(?:\\.[^'\\]*)*)'/g, '": "$1"');
-
-	// Remove trailing commas before } or ]
-	s = s.replace(/,\s*([}\]])/g, "$1");
-
-	// Attempt to close unclosed structure: count braces
-	let depth = 0;
-	let inString = false;
-	let escaped = false;
-	let lastBrace = -1;
-	for (let i = 0; i < s.length; i++) {
-		const ch = s[i];
-		if (escaped) { escaped = false; continue; }
-		if (ch === "\\" && inString) { escaped = true; continue; }
-		if (ch === '"' && !escaped) { inString = !inString; continue; }
-		if (inString) continue;
-		if (ch === "{" || ch === "[") { depth++; lastBrace = i; }
-		if (ch === "}" || ch === "]") { depth--; lastBrace = i; }
+	if (!args) {
+		cmdCtx.ui.notify(t.fg("error", "Usage: /bake-spec-decompose <path>"), "info");
+		return;
 	}
 
-	// If we're inside an unclosed string, add closing quote
-	if (inString) s += '"';
-
-	// Close unclosed braces/brackets in reverse order
-	if (depth > 0 && s.length > 0) {
-		const closers: string[] = [];
-		// Re-scan to determine which closers are needed
-		const stack: string[] = [];
-		let si = false;
-		let se = false;
-		for (let i = 0; i < s.length; i++) {
-			const ch = s[i];
-			if (se) { se = false; continue; }
-			if (ch === "\\" && si) { se = true; continue; }
-			if (ch === '"' && !se) { si = !si; continue; }
-			if (si) continue;
-			if (ch === "{") stack.push("}");
-			if (ch === "[") stack.push("]");
-			if (ch === "}" || ch === "]") {
-				if (stack.length > 0 && stack[stack.length - 1] === ch) stack.pop();
-			}
-		}
-		for (let i = stack.length - 1; i >= 0; i--) {
-			closers.push(stack[i]);
-		}
-		s += closers.join("");
+	const specPath = path.resolve(args);
+	if (!fs.existsSync(specPath)) {
+		cmdCtx.ui.notify(t.fg("error", `File not found: ${specPath}`), "info");
+		return;
 	}
 
-	return s;
+	const specContent = fs.readFileSync(specPath, "utf-8");
+	const decomposePrompt = buildDecomposePrompt(specContent);
+
+	cmdCtx.ui.setStatus("bake", t.fg("accent", "○ Decomposing spec..."));
+
+	bakeCtx.loaderMsg = "Decomposing spec...";
+	let aborted = false;
+
+	const overlay = showLoaderOverlay(
+		cmdCtx.ui,
+		() => bakeCtx.loaderMsg,
+		() => {
+			aborted = true;
+			bake?.abort();
+		},
+	);
+
+	try {
+		const output = await bake.runPrompt(decomposePrompt, "Decompose");
+
+		// Extract JSON from LLM output (strip fences, trim)
+		let jsonStr = output.trim();
+		jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+		const firstBrace = jsonStr.indexOf("{");
+		const lastBrace = jsonStr.lastIndexOf("}");
+		if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+			jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+		}
+
+		const rawLogPath = path.join(BAKE_BASE, ".bake", "decompose-raw-output.txt");
+
+		let decomposition: any;
+		try {
+			decomposition = tryParseJSON(jsonStr, rawLogPath);
+		} catch (parseErr: any) {
+			cmdCtx.ui.notify(
+				t.fg("error", `Decompose: ${parseErr.message}`),
+				"info",
+			);
+			return;
+		}
+
+		if (!fs.existsSync(PHASES_DIR)) {
+			fs.mkdirSync(PHASES_DIR, { recursive: true });
+		}
+
+		writeDagManifest(decomposition.phases, PHASES_DIR);
+		writePhaseFiles(decomposition.phases, PHASES_DIR);
+
+		if (decomposition.context) {
+			writeContext(decomposition.context, BAKE_DB_DIR);
+		}
+
+		const archived = archiveSpec(specPath, BAKE_DB_DIR);
+		if (archived) {
+			cmdCtx.ui.notify(t.fg("dim", `Raw spec archived to .bake/archive/`), "info");
+		}
+
+		cmdCtx.ui.notify(
+			t.fg("success", `${decomposition.phases.length} phases written to phases/`),
+			"info",
+		);
+
+		// Fire-and-forget README generation
+		if (decomposition.context) {
+			generateReadme(bake, decomposition.context, decomposition.phases, t, cmdCtx);
+		}
+	} catch (err: any) {
+		if (aborted) {
+			cmdCtx.ui.notify(t.fg("warning", "Decompose aborted"), "info");
+		} else {
+			cmdCtx.ui.notify(t.fg("error", `Decompose failed: ${err.message}`), "info");
+		}
+	} finally {
+		overlay.close();
+		cmdCtx.ui.setStatus("bake", t.fg("dim", "⏎ bake ready"));
+	}
 }
 
 /**
- * Try to parse JSON with repair attempts.
- * Returns parsed object or throws with details if all attempts fail.
+ * Fire-and-forget: generate a README.md from the spec context.
+ * Errors are logged as warnings, never thrown.
  */
-function tryParseJSON(raw: string, logPath: string): any {
-	// First attempt: direct parse
-	try {
-		return JSON.parse(raw);
-	} catch {
-		// Save original for debugging
-		fs.writeFileSync(logPath, raw, "utf-8");
-	}
+async function generateReadme(
+	bake: any,
+	context: string,
+	phases: any[],
+	t: any,
+	cmdCtx: any,
+): Promise<void> {
+	bakeCtx.loaderMsg = "Generating README...";
+	bake.setLoader(true, "Generating README...");
 
-	// Second attempt: repair and parse
-	const repaired = repairJSON(raw);
-	try {
-		const parsed = JSON.parse(repaired);
-		return parsed;
-	} catch (e: any) {
-		// Save repaired version too for comparison
-		fs.writeFileSync(
-			logPath.replace(/\.txt$/, "-repaired.txt"),
-			repaired,
-			"utf-8",
-		);
-		throw new Error(
-			`JSON parse error after repair: ${e.message}. Raw output saved to ${logPath}`,
-		);
-	}
+	const readmePrompt = buildReadmePrompt(context, phases);
+
+	bake
+		.runPrompt(readmePrompt, "README")
+		.then((readmeContent: string) => {
+			const cleaned = readmeContent.replace(/^```[a-z]*\n?|```$/gm, "").trim();
+			fs.writeFileSync(path.join(BAKE_BASE, "README.md"), cleaned + "\n", "utf-8");
+			cmdCtx.ui.notify(t.fg("success", "README.md generated"), "info");
+		})
+		.catch((err: any) => {
+			cmdCtx.ui.notify(
+				t.fg("warning", `README generation skipped: ${err.message}`),
+				"info",
+			);
+		})
+		.finally(() => {
+			bake.setLoader(false, "");
+		});
 }
 
 export function register(pi: ExtensionAPI): void {
 	pi.registerCommand("bake-spec-decompose", {
 		description: "Decompose a raw spec file into clean phase files",
 		usage: "<path-to-raw-spec>",
-		handler: async (args, cmdCtx) => {
-			const bake = bakeCtx.bake;
-			if (!bake) {
-				cmdCtx.ui.notify(cmdCtx.ui.theme.fg("error", "Bake not initialized"), "info");
-				return;
-			}
-			const t = cmdCtx.ui.theme;
-			if (!args) {
-				cmdCtx.ui.notify(t.fg("error", "Usage: /bake-spec-decompose <path>"), "info");
-				return;
-			}
-			const specPath = path.resolve(args);
-			if (!fs.existsSync(specPath)) {
-				cmdCtx.ui.notify(t.fg("error", `File not found: ${specPath}`), "info");
-				return;
-			}
-
-			const specContent = fs.readFileSync(specPath, "utf-8");
-
-			// Truncate ultra-long specs to avoid LLM output truncation
-			const MAX_SPEC_LENGTH = 16000;
-			const truncated =
-				specContent.length > MAX_SPEC_LENGTH
-					? specContent.slice(0, MAX_SPEC_LENGTH) +
-						"\n\n[... TRUNCATED: spec too large, keeping first ~16KB for reliable decomposition]"
-					: specContent;
-
-			const decomposePrompt = `You are decomposing a technical specification into discrete, actionable phases for an autonomous coding agent.
-
-Output a valid JSON object with NO markdown wrapping, NO code fences, NO commentary before or after. Just raw JSON.
-
-The JSON must match this TypeScript type exactly:
-{
-  "phases": Array<{ "id": string, "name": string, "summary": string, "done_when": string, "depends_on": string[], "plan": string[] }>,
-  "context": string
-}
-
-Guidelines:
-- "id" is unique and short (e.g., "02_wifi_state_machine")
-- "name" is the human-readable display name (e.g., "WiFi State Machine")
-- "summary" is a one-line objective
-- "done_when" is the acceptance criteria (1-2 sentences)
-- "depends_on" is an array of phase IDs that must complete before this phase starts. Empty array means no dependencies (can run immediately). Use this to express the build order — infrastructure phases have no deps, dependent features reference their prerequisites.
-- "plan" is an array of concrete, ordered implementation steps for this phase. Each step should be a single actionable instruction the executor can follow. Example: ["Create src/wifi/wifi_state.h with enum for AP/STA states", "Implement state transition in wifi_state.cpp", "Add unit test for AP→STA transition"]
-- "context" captures everything else: narrative, philosophy, out-of-scope items, operational notes, hardware constraints — anything that doesn't belong in a single phase
-- Generate 6-15 phases depending on spec complexity. Group independent phases so they can run in parallel.
-- If phases 2a and 2b don't depend on each other but both depend on phase 1, set depends_on: ["phase_1"] on both — the system will run them concurrently.
-- Do NOT truncate — produce the complete JSON
-- IMPORTANT: Escape all double-quotes inside strings with backslash
-
-Raw spec:
-${truncated}`;
-
-			cmdCtx.ui.setStatus("bake", t.fg("accent", "○ Decomposing spec..."));
-
-			// ── Show LoaderComponent overlay ──
-			let loaderDone: (() => void) | null = null;
-			let aborted = false;
-			bakeCtx.loaderMsg = "Decomposing spec...";
-
-			const loaderP = cmdCtx.ui.custom(
-				(tui, theme, _kb, done) => {
-					loaderDone = () => {
-						try {
-							done(undefined);
-						} catch {
-							/* already closed */
-						}
-					};
-					const comp = new LoaderComponent(tui, theme.fg.bind(theme), theme.bg.bind(theme), () => bakeCtx.loaderMsg);
-
-					return {
-						render: (w: number) => comp.render(w),
-						invalidate: () => {},
-						handleInput: (data: string) => {
-							if (data === "escape" || data === "q") {
-								aborted = true;
-								bake?.abort();
-							}
-						},
-						dispose: () => {
-							comp.dispose();
-						},
-					};
-				},
-				{
-					overlay: true,
-					overlayOptions: {
-						anchor: "bottom-center",
-						margin: 1,
-					},
-				},
-			);
-
-			try {
-				const output = await bake.runPrompt(decomposePrompt, "Decompose");
-
-				// Try to extract JSON from the output
-				let jsonStr = output.trim();
-
-				// Strip markdown code fences if the LLM wrapped the JSON despite instructions
-				jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-
-				// If output doesn't start with {, find the first { and use from there
-				const firstBrace = jsonStr.indexOf("{");
-				const lastBrace = jsonStr.lastIndexOf("}");
-				if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
-					jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
-				}
-
-				const rawLogPath = path.join(BAKE_BASE, ".bake", "decompose-raw-output.txt");
-
-				let decomposition: any;
-				try {
-					decomposition = tryParseJSON(jsonStr, rawLogPath);
-				} catch (parseErr: any) {
-					cmdCtx.ui.notify(
-						t.fg("error", `Decompose: ${parseErr.message}`),
-						"info",
-					);
-					return;
-				}
-				if (!fs.existsSync(PHASES_DIR)) fs.mkdirSync(PHASES_DIR, { recursive: true });
-
-				// Write DAG manifest for the state machine
-				const dagManifest = decomposition.phases.map((p: any) => ({
-					id: p.id || p.name.replace(/[^a-zA-Z0-9_-]/g, "_"),
-					name: p.name,
-					depends_on: p.depends_on || [],
-				}));
-				fs.writeFileSync(
-					path.join(PHASES_DIR, "dag.json"),
-					JSON.stringify(dagManifest, null, 2),
-					"utf-8",
-				);
-
-				for (const phase of decomposition.phases) {
-					const phaseId = phase.id || phase.name.replace(/[^a-zA-Z0-9_-]/g, "_");
-					const fileName = phaseId + ".md";
-					const deps = (phase.depends_on || []).length > 0
-						? `\n## Depends On\n${phase.depends_on.join(", ")}\n`
-						: "\n## Depends On\n(none)\n";
-					const planSteps = (phase.plan || []).length > 0
-						? `\n## Plan\n${phase.plan.map((s: string) => `- ${s}`).join("\n")}\n`
-						: "\n## Plan\n(none)\n";
-					const content = `# ${phase.name}\n\n## Phase ID\n${phaseId}\n${deps}## Objective\n${phase.summary}\n\n## Done When\n${phase.done_when}\n${planSteps}`;
-					fs.writeFileSync(path.join(PHASES_DIR, fileName), content, "utf-8");
-				}
-				}
-				if (decomposition.context) {
-					fs.writeFileSync(
-						path.join(BAKE_DB_DIR, "spec-context.md"),
-						decomposition.context,
-						"utf-8",
-					);
-				}
-				// If the source spec was inside PHASES_DIR, archive it so the pipeline won't try to execute it
-				const resolvedPhases = path.resolve(PHASES_DIR);
-				if (specPath.startsWith(resolvedPhases)) {
-					const archiveDir = path.join(BAKE_DB_DIR, "archive");
-					if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
-					const dest = path.join(archiveDir, `${path.basename(specPath)}.decomposed`);
-					fs.renameSync(specPath, dest);
-					cmdCtx.ui.notify(t.fg("dim", `Raw spec archived to .bake/archive/`), "info");
-				}
-
-				cmdCtx.ui.notify(t.fg("success", `${decomposition.phases.length} phases written to phases/`), "info");
-
-				// ── Generate a README from the spec context (non-blocking) ──
-				if (decomposition.context) {
-					bakeCtx.loaderMsg = "Generating README...";
-					bake.setLoader(true, "Generating README...");
-
-					const readmePrompt = `You are a technical writer for an open-source project.
-Write a README.md for the project described below.
-
-Context:
-${decomposition.context}
-
-Phases:
-${decomposition.phases.map((p: any) => `- ${p.name}: ${p.summary}`).join("\n")}
-
-Output ONLY markdown, no extra commentary. The README should include:
-- Project name and purpose (one-liner)
-- What it does (2-3 sentences)
-- Quick start / usage
-- Architecture overview (bullets)
-- License (MIT)
-
-Write it clean, direct, no fluff.`;
-
-					// Fire and forget — don't block the compose flow
-					bake
-						.runPrompt(readmePrompt, "README")
-						.then((readmeContent: string) => {
-							const cleaned = readmeContent.replace(/^```[a-z]*\n?|```$/gm, "").trim();
-							fs.writeFileSync(path.join(BAKE_BASE, "README.md"), cleaned + "\n", "utf-8");
-							cmdCtx.ui.notify(t.fg("success", "README.md generated"), "info");
-						})
-						.catch((err: any) => {
-							cmdCtx.ui.notify(t.fg("warning", `README generation skipped: ${err.message}`), "info");
-						})
-						.finally(() => {
-							bake.setLoader(false, "");
-						});
-				}
-			} catch (err: any) {
-				if (aborted) {
-					cmdCtx.ui.notify(t.fg("warning", "Decompose aborted"), "info");
-				} else {
-					cmdCtx.ui.notify(t.fg("error", `Decompose failed: ${err.message}`), "info");
-				}
-			} finally {
-				if (loaderDone) {
-					loaderDone();
-					loaderDone = null;
-				}
-				loaderP.catch(() => {});
-				cmdCtx.ui.setStatus("bake", t.fg("dim", "⏎ bake ready"));
-			}
-		},
+		handler: handleDecompose,
 	});
 }

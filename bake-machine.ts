@@ -103,13 +103,13 @@ function phaseMachine(env: BakeEnv) {
 				| { type: "ABORT" }
 				| { type: "PROVIDE_CONTEXT"; info: string };
 			output: PhaseResult;
-		};
-		actors: {
-			execute: ReturnType<typeof fromPromise<ExecutorResult, { spec: PhaseSpec; attempt: number; steer: string | null }>>;
-			structural: ReturnType<typeof fromPromise<AuditFinding[], {}>>;
-			semantic: ReturnType<typeof fromPromise<AuditFinding[], {}>>;
-			remediate: ReturnType<typeof fromPromise<boolean, { spec: PhaseSpec; findings: AuditFinding[]; attempt: number }>>;
-		};
+			actors: {
+				execute: ReturnType<typeof fromPromise<ExecutorResult, { spec: PhaseSpec; attempt: number; steer: string | null }>>;
+				structural: ReturnType<typeof fromPromise<AuditFinding[], {}>>;
+				semantic: ReturnType<typeof fromPromise<AuditFinding[], {}>>;
+				remediate: ReturnType<typeof fromPromise<boolean, { spec: PhaseSpec; findings: AuditFinding[]; attempt: number }>>;
+			};
+		},
 	}).createMachine({
 		id: "phase",
 		initial: "executing",
