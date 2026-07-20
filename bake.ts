@@ -27,6 +27,8 @@ export interface PhaseSpec {
 	phaseId: string;
 	/** Phase IDs this phase depends on (empty = no deps, runnable immediately) */
 	dependsOn: string[];
+	/** Ordered implementation steps parsed from the Plan section */
+	planSteps: string[];
 }
 
 export interface BakeState {
@@ -249,7 +251,17 @@ export class Bake {
 					}
 				}
 
-				return { name, filePath, content, phaseId, dependsOn };
+				// Parse plan steps from phase content
+				const planMatch = content.match(/^## Plan\n([\s\S]*?)(?:\n##|$)/m);
+				const planSteps: string[] = [];
+				if (planMatch) {
+					for (const line of planMatch[1].split("\n")) {
+						const trimmed = line.replace(/^[-*\s]+/, "").trim();
+						if (trimmed && trimmed !== "(none)") planSteps.push(trimmed);
+					}
+				}
+
+				return { name, filePath, content, phaseId, dependsOn, planSteps };
 			});
 	}
 

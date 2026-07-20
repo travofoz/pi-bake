@@ -152,7 +152,7 @@ Output a valid JSON object with NO markdown wrapping, NO code fences, NO comment
 
 The JSON must match this TypeScript type exactly:
 {
-  "phases": Array<{ "id": string, "name": string, "summary": string, "done_when": string, "depends_on": string[] }>,
+  "phases": Array<{ "id": string, "name": string, "summary": string, "done_when": string, "depends_on": string[], "plan": string[] }>,
   "context": string
 }
 
@@ -162,6 +162,7 @@ Guidelines:
 - "summary" is a one-line objective
 - "done_when" is the acceptance criteria (1-2 sentences)
 - "depends_on" is an array of phase IDs that must complete before this phase starts. Empty array means no dependencies (can run immediately). Use this to express the build order — infrastructure phases have no deps, dependent features reference their prerequisites.
+- "plan" is an array of concrete, ordered implementation steps for this phase. Each step should be a single actionable instruction the executor can follow. Example: ["Create src/wifi/wifi_state.h with enum for AP/STA states", "Implement state transition in wifi_state.cpp", "Add unit test for AP→STA transition"]
 - "context" captures everything else: narrative, philosophy, out-of-scope items, operational notes, hardware constraints — anything that doesn't belong in a single phase
 - Generate 6-15 phases depending on spec complexity. Group independent phases so they can run in parallel.
 - If phases 2a and 2b don't depend on each other but both depend on phase 1, set depends_on: ["phase_1"] on both — the system will run them concurrently.
@@ -260,7 +261,10 @@ ${truncated}`;
 					const deps = (phase.depends_on || []).length > 0
 						? `\n## Depends On\n${phase.depends_on.join(", ")}\n`
 						: "\n## Depends On\n(none)\n";
-					const content = `# ${phase.name}\n\n## Phase ID\n${phaseId}\n${deps}## Objective\n${phase.summary}\n\n## Done When\n${phase.done_when}\n`;
+					const planSteps = (phase.plan || []).length > 0
+						? `\n## Plan\n${phase.plan.map((s: string) => `- ${s}`).join("\n")}\n`
+						: "\n## Plan\n(none)\n";
+					const content = `# ${phase.name}\n\n## Phase ID\n${phaseId}\n${deps}## Objective\n${phase.summary}\n\n## Done When\n${phase.done_when}\n${planSteps}`;
 					fs.writeFileSync(path.join(PHASES_DIR, fileName), content, "utf-8");
 				}
 				}

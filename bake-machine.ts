@@ -46,7 +46,7 @@ import {
 } from "xstate";
 import type { PhaseSpec, AuditFinding } from "./bake.ts";
 import { EventLog } from "./event-log.ts";
-import { runExecutor, type ExecutorDeps } from "./bake-executor.ts";
+import { runExecutor, type ExecutorDeps, type ExecutorResult } from "./bake-executor.ts";
 import { runStructuralAudit } from "./auditor.ts";
 import { runSemanticAudit, runRemediation } from "./bake-audit.ts";
 
@@ -96,12 +96,16 @@ function phaseMachine(env: BakeEnv) {
 				attempt: number;
 				maxAttempts: number;
 				findings: AuditFinding[];
+				concerns: string[];
+				blockReason: string | null;
 			};
-			events: { type: "ABORT" };
+			events:
+				| { type: "ABORT" }
+				| { type: "PROVIDE_CONTEXT"; info: string };
 			output: PhaseResult;
 		};
 		actors: {
-			execute: ReturnType<typeof fromPromise<boolean, { spec: PhaseSpec; attempt: number; steer: string | null }>>;
+			execute: ReturnType<typeof fromPromise<ExecutorResult, { spec: PhaseSpec; attempt: number; steer: string | null }>>;
 			structural: ReturnType<typeof fromPromise<AuditFinding[], {}>>;
 			semantic: ReturnType<typeof fromPromise<AuditFinding[], {}>>;
 			remediate: ReturnType<typeof fromPromise<boolean, { spec: PhaseSpec; findings: AuditFinding[]; attempt: number }>>;
@@ -114,6 +118,8 @@ function phaseMachine(env: BakeEnv) {
 			attempt: 0,
 			maxAttempts: env.maxAttempts,
 			findings: [],
+			concerns: [],
+			blockReason: null,
 		}),
 		states: {
 			executing: {
@@ -124,11 +130,61 @@ function phaseMachine(env: BakeEnv) {
 						attempt: context.attempt,
 						steer: env.pendingSteer(),
 					}),
-					onDone: { target: "auditing" },
+					onDone: [
+						{
+							guard: ({ event }) => event.output.status === "BLOCKED",
+							target: "failed",
+							actions: ({ context, event }) => {
+								context.blockReason = event.output.blockReason ?? "No reason given";
+								env.log.append("executor_blocked", {
+									phase: context.spec.phaseId,
+									reason: context.blockReason,
+								});
+							},
+						},
+						{
+							guard: ({ event }) => event.output.status === "NEEDS_CONTEXT",
+							target: "contextWait",
+							actions: ({ context, event }) => {
+								context.blockReason = event.output.blockReason ?? "No details given";
+								env.log.append("executor_needs_context", {
+									phase: context.spec.phaseId,
+									reason: context.blockReason,
+								});
+							},
+						},
+						{
+							// DONE or DONE_WITH_CONCERNS → auditing
+							target: "auditing",
+							actions: ({ context, event }) => {
+								if (event.output.status === "DONE_WITH_CONCERNS" && event.output.concerns) {
+									context.concerns = event.output.concerns;
+									env.log.append("executor_concerns", {
+										phase: context.spec.phaseId,
+										concerns: event.output.concerns,
+									});
+								}
+							},
+						},
+					],
 					onError: {
 						target: "remediating",
 						actions: ({ context }) => { context.attempt++; },
 					},
+				},
+			},
+
+			/** Operator needs to provide info to unblock this phase. */
+			contextWait: {
+				on: {
+					PROVIDE_CONTEXT: {
+						target: "executing",
+						actions: ({ context, event }) => {
+							context.blockReason = null;
+							env.pendingSteer = () => event.info;
+						},
+					},
+					ABORT: { target: "failed" },
 				},
 			},
 
@@ -142,14 +198,8 @@ function phaseMachine(env: BakeEnv) {
 								invoke: {
 									src: "structural",
 									onDone: [
-										{
-											guard: ({ event }) => event.output.length === 0,
-											target: "pass",
-										},
-										{
-											target: "fail",
-											actions: ({ context, event }) => { context.findings.push(...event.output); },
-										},
+										{ guard: ({ event }) => event.output.length === 0, target: "pass" },
+										{ target: "fail", actions: ({ context, event }) => { context.findings.push(...event.output); } },
 									],
 									onError: { target: "fail" },
 								},
@@ -165,14 +215,8 @@ function phaseMachine(env: BakeEnv) {
 								invoke: {
 									src: "semantic",
 									onDone: [
-										{
-											guard: ({ event }) => event.output.length === 0,
-											target: "pass",
-										},
-										{
-											target: "fail",
-											actions: ({ context, event }) => { context.findings.push(...event.output); },
-										},
+										{ guard: ({ event }) => event.output.length === 0, target: "pass" },
+										{ target: "fail", actions: ({ context, event }) => { context.findings.push(...event.output); } },
 									],
 									onError: { target: "fail" },
 								},
@@ -183,10 +227,7 @@ function phaseMachine(env: BakeEnv) {
 					},
 				},
 				onDone: [
-					{
-						guard: ({ context }) => context.findings.length === 0,
-						target: "completed",
-					},
+					{ guard: ({ context }) => context.findings.length === 0, target: "completed" },
 					{ target: "remediating" },
 				],
 			},
@@ -240,7 +281,7 @@ function phaseMachine(env: BakeEnv) {
 function wirePhaseMachine(pm: ReturnType<typeof phaseMachine>, env: BakeEnv) {
 	return pm.provide({
 		actors: {
-			execute: fromPromise<boolean, { spec: PhaseSpec; attempt: number; steer: string | null }>(
+			execute: fromPromise<ExecutorResult, { spec: PhaseSpec; attempt: number; steer: string | null }>(
 				async ({ input }) => runExecutor(input.spec, input.attempt, input.steer, {
 					workspaceDir: env.workspaceDir,
 					rpcAgent: env.rpcAgent,
