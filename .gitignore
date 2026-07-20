@@ -9,3 +9,5 @@ node_modules/
 /phases
 /workspace
 .bake/config.json
+scripts/pi-config-export/
+scripts/pi-config-export.tar.gz
