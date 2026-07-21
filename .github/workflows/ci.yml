@@ -18,21 +18,13 @@ jobs:
 
       - name: Validate ast-grep rules
         run: |
-          # Check all .yml files in rules/base/ parse as valid YAML
           for f in rules/base/*.yml; do
             echo "  checking $f"
-            node -e "
-              const fs = require('fs');
-              const yaml = fs.readFileSync('$f', 'utf8');
-              // basic YAML structural check: count colons
-              const lines = yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'));
-              // ast-grep rules have specific keys we can verify
-              const hasId = /^id:/m.test(yaml);
-              const hasRule = /^rule:/m.test(yaml);
-              if (!hasId) { console.error('  ✗ missing id:'); process.exitCode = 1; }
-              if (!hasRule) { console.error('  ✗ missing rule:'); process.exitCode = 1; }
-              console.log('  ✓ valid');
-            "
+            if ! yq eval '.id and .rule' "$f" >/dev/null 2>&1; then
+              echo "  ✗ missing id or rule: $f"
+              exit 1
+            fi
+            echo "  ✓ valid"
           done
 
       - name: Verify package.json
@@ -62,15 +54,10 @@ jobs:
             echo "  ℹ  no phase files yet"
           fi
 
-      - name: Verify TypeScript syntax (no type-check)
+      - name: Check TypeScript compiles with dependencies
         run: |
-          # Install tsx or just use node to check syntax of .ts files
-          npm install -g typescript 2>/dev/null
-          for f in *.ts commands/*.ts components/*.ts; do
-            [ -f "$f" ] || continue
-            npx tsc --noEmit --lib es2022,dom --moduleResolution bundler --skipLibCheck "$f" 2>&1 | head -3 || true
-          done
-          echo "  ℹ  syntax check complete (type errors from peer deps expected)"
+          npm install 2>/dev/null
+          npx tsc --noEmit --pretty 2>&1 | head -30
 
       - name: Check index.html is valid HTML5
         run: |

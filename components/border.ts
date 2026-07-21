@@ -30,8 +30,13 @@ export class Border implements Component {
 		const leftTab = DITHER_TABS[0];
 		const rightTab = DITHER_TABS[1];
 		const tabLen = leftTab.length + rightTab.length;
-		const railLen = Math.max(0, width - tabLen);
-
+		// For narrow widths (< tabs), drop dither tabs instead of overflowing
+		if (width < tabLen) {
+			const railLen = width;
+			const repeats = Math.ceil(railLen / RAIL_PATTERN.length);
+			return [this.color(RAIL_PATTERN.repeat(repeats).slice(0, railLen))];
+		}
+		const railLen = width - tabLen;
 		const repeats = Math.max(1, Math.ceil(railLen / RAIL_PATTERN.length));
 		const rail = RAIL_PATTERN.repeat(repeats).slice(0, railLen);
 
@@ -64,8 +69,11 @@ export class AnimatedBorder implements Component {
 		const leftTab = DITHER_TABS[0];
 		const rightTab = DITHER_TABS[1];
 		const tabLen = leftTab.length + rightTab.length;
-		const railLen = Math.max(0, width - tabLen);
-
+		// For narrow widths (< tabs), drop dither tabs instead of overflowing
+		if (width < tabLen) {
+			return [this.color(pulseRail(width, frame, "═", 6))];
+		}
+		const railLen = width - tabLen;
 		// Pulse nodes every 6 chars along the rail
 		const rail = pulseRail(railLen, frame, "═", 6);
 

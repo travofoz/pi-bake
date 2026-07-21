@@ -8,7 +8,7 @@ bake-start → executor → ast-grep audit → LLM audit → (remediate → loop
 
 ## How It Works
 
-You write phase specs (markdown files in `phases/`), each with a clear objective and done-when criteria. Bake runs them sequentially:
+You write phase specs (markdown files in `phases/`), each with a clear objective and done-when criteria. Bake runs them through a multi-stage pipeline (sequentially per phase, with DAG support for parallel phases via dag.json):
 
 1. **Executor** — fires up a fresh `pi --mode rpc` subprocess with the phase spec, lets it code
 2. **Structural audit** — runs ast-grep rules against the workspace (deterministic, ~50ms)
@@ -16,17 +16,19 @@ You write phase specs (markdown files in `phases/`), each with a clear objective
 4. **Remediation** — if audits fail, feeds findings back to the executor for another pass (up to N attempts)
 5. **Circuit breaker** — if remediation maxes out, the phase is marked failed and the pipeline halts
 
+Phases with no cross-dependencies run concurrently. A `dag.json` manifest in `phases/` declares the dependency graph — independent phases execute in parallel batches.
+
 State is tracked in `.bake/state.json` — you can pause, resume, skip, steer, and retry phases at any time.
 
 ### Commands
 
 | Command | What it does |
-|---|---|
+| --- | --- |
 | `/bake-start` | Run the pipeline (or resume from where it left off) |
 | `/bake-pause` | Pause after the current phase finishes |
 | `/bake-resume` | Resume a paused pipeline |
 | `/bake-skip` | Mark the current phase as skipped, move to next |
-| `/bake-retry` | Retry the last completed or failed phase |
+| `/bake-retry` | Retry the current phase (re-run executor from scratch) |
 | `/bake-steer <msg>` | Inject steering guidance for the next executor run |
 | `/bake-status` | Show current state, recent events |
 | `/bake-log` | View the full event log |
@@ -118,7 +120,7 @@ Files are sorted by name and executed in order. Each phase is a focused, verifia
 Bake ships with a set of structural audit rules in `rules/base/` that run after each executor pass. These catch common issues deterministically (~50ms) before the semantic LLM audit even fires.
 
 | Rule | Catches |
-|---|---|
+| --- | --- |
 | `no-console-log` | `console.log(...)` in production code |
 | `no-debugger` | Stray `debugger` statements |
 | `no-empty-catch` | Bare `catch {}` swallowing errors |
