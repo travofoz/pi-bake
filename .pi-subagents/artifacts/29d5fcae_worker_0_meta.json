@@ -1,0 +1,97 @@
+{
+  "runId": "29d5fcae",
+  "agent": "worker",
+  "task": "You are a delegated subagent running from a fork of the parent session. Treat the inherited conversation as reference-only context, not a live thread to continue. Do not continue or answer prior messages as if they are waiting for a reply. Your sole job is to execute the task below and return a focused result for that task using your tools.\n\nTask:\nFix remaining issues in /home/droid/pi-bake.\n\n## Problem 1: TUI scroll hell from working indicator\n\nThe root cause: `setWorkingIndicator` with 51 frames at 60ms interval triggers `Loader.updateDisplay()` → `this.ui.requestRender()` on every frame tick (16 times/sec). Each `requestRender()` repaints the entire TUI, which resets tmux scrollback position.\n\npi-tui's Loader (at `node_modules/@earendil-works/pi-tui/dist/components/loader.js`) renders in the `statusContainer`, which sits ABOVE the widget in the TUI layout. The spinner renders as a 2-line component.\n\nThe user wants the original braille spinner above the widget working.\n\n**What to do in /home/droid/pi-bake/index.ts:**\n\n1. Restore a `setWorkingIndicator` call, but with SANE parameters:\n   - Use a simple braille spinner array (6-8 frames, not 51)\n   - Set intervalMs to 250-300 (not 60)\n   - Remove the custom buildWorkingFrames function entirely (was 51 frames of heavy braille gradients)\n\n2. The spinner should show when pipeline is active and clear when done.\n   - The existing onStateChange handler already clears with `ctx.ui.setWorkingIndicator()` (no args)\n   - Keep that behavior — it clears the indicator\n\n3. Remove the `setStatus`-based spinner I added earlier (the SPINNER_FRAMES/startSpinner/stopSpinner code) — that was a workaround that doesn't solve the real problem.\n\n4. The widget's KITT scanner should be preserved (it has no timer, only renders on interaction).\n\n## Problem 2: Remove the startSpinner/stopSpinner cruft I added\n\nIn index.ts, I added a SPINNER_FRAMES array and startSpinner/stopSpinner functions that cycle braille chars through setStatus. This was based on wrong assumptions. Remove it entirely. The proper fix is the setWorkingIndicator with sane parameters.\n\n## What to keep:\n- The widget BakeWidget and its scanner (Date.now-based, no timer) — NO CHANGE\n- The onStateChange handler that clears working indicator on done/failed/idle — keep it\n- The onStatus/onLoader callbacks — keep them\n- The \"⏎ bake ready\" status line — keep it\n\n## What to change in index.ts:\n- Replace the spinner timer + status-line cruft with a proper setWorkingIndicator call\n- Use simple braille frames: [\"⠋\", \"⠙\", \"⠹\", \"⠸\", \"⠼\", \"⠴\", \"⠦\", \"⠧\", \"⠇\", \"⠏\"]  \n- intervalMs: 250\n- Don't build 51-frame KITT scanner for the working indicator — keep that in the widget\n\nRead the file first, understand the current state, then make targeted edits. Test with the available tooling.",
+  "exitCode": 143,
+  "usage": {
+    "input": 141579,
+    "output": 69,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 1
+  },
+  "model": "opencode/deepseek-v4-flash-free:high",
+  "attemptedModels": [
+    "opencode/deepseek-v4-flash-free:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode/deepseek-v4-flash-free:high",
+      "success": false,
+      "exitCode": 143,
+      "usage": {
+        "input": 141579,
+        "output": 69,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 1
+      }
+    }
+  ],
+  "durationMs": 22507,
+  "toolCount": 1,
+  "acceptance": {
+    "status": "rejected",
+    "explicit": true,
+    "effectiveAcceptance": {
+      "level": "checked",
+      "explicit": true,
+      "inferredReason": [
+        "write-capable worker/task"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Implement the requested change without widening scope",
+          "evidence": [
+            "changed-files",
+            "tests-added",
+            "commands-run",
+            "residual-risks",
+            "no-staged-files"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "changed-files",
+        "tests-added",
+        "commands-run",
+        "residual-risks",
+        "no-staged-files"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "write-capable worker/task"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Implement the requested change without widening scope",
+        "evidence": [
+          "changed-files",
+          "tests-added",
+          "commands-run",
+          "residual-risks",
+          "no-staged-files"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [
+      {
+        "id": "attestation",
+        "status": "failed",
+        "message": "Structured acceptance report not found."
+      }
+    ],
+    "verifyRuns": [],
+    "childReportParseError": "Structured acceptance report not found."
+  },
+  "transcriptPath": "/home/droid/pi-bake/.pi-subagents/artifacts/29d5fcae_worker_0_transcript.jsonl",
+  "timestamp": 1784645145591
+}

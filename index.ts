@@ -49,16 +49,15 @@ type AnimTheme = ThemeProxy;
 // ─── Widget component (Component interface — rendered by TUI, no setWidget spam) ───
 class BakeWidget implements Component {
 	private theme: AnimTheme;
-	private startTime: number;
+	private renderCount = 0;
 
 	constructor(theme: AnimTheme) {
 		this.theme = theme;
-		this.startTime = Date.now();
 	}
 
-	/** Reset scanner animation timer — called after bake-reset. */
+	/** Reset scanner animation counter — called after bake-reset. */
 	reset(): void {
-		this.startTime = Date.now();
+		this.renderCount = 0;
 	}
 
 	invalidate() {}
@@ -108,9 +107,9 @@ class BakeWidget implements Component {
 			return [parts.join("  ")];
 		}
 
-		// Full mode — time-based scanner header (position from Date.now(), cached phase list)
-		const elapsed = (Date.now() - this.startTime) / 1000;
-		const scanPos = Math.abs(Math.sin(elapsed * 1.2));
+		// Full mode — render-counter-based scanner (advances on each render call only)
+		this.renderCount++;
+		const scanPos = Math.abs(Math.sin(this.renderCount * 0.06));
 		const doneCount = state.completedPhases.length + state.skippedPhases.length;
 		const phaseLines = allPhases.map((phase, idx) => {
 			if (state.completedPhases.includes(phase)) {
@@ -139,10 +138,18 @@ class BakeWidget implements Component {
 }
 
 export default function (pi: ExtensionAPI) {
+	// Guard: session_start listeners accumulate on /reload.
+	// Without this, each reload spawns a new Bake + RPC agent + timer,
+	// and old instances orphan with no cleanup.
+	let initialized = false;
+
 	registerAll(pi);
 
 	// ── session_start: one-time init ──
 	pi.on("session_start", async (_event, ctx) => {
+		if (initialized) return; // /reload guard — skip re-init to avoid leaks
+		initialized = true;
+
 		bakeCtx.bake = new Bake(BAKE_BASE, WORKSPACE_DIR, RULES_DIR);
 
 		// Ensure workspace dir exists + root symlink
@@ -183,38 +190,6 @@ export default function (pi: ExtensionAPI) {
 
 		const t = ctx.ui.theme;
 
-		// ── Working indicator: single red KITT scanner (60ms, independent of TUI render) ──
-		const RED_B = "\x1b[38;5;196m";
-		const RED_M = "\x1b[38;5;160m";
-		const RED_D = "\x1b[38;5;88m";
-		const GRN_D = "\x1b[38;5;65m";
-		const RST = "\x1b[0m";
-		const buildWorkingFrames = (cols: number) => {
-			const W = Math.max(8, cols - 3);
-			const B = ["⠀", "⡀", "⡠", "⡦", "⡶", "⣶", "⣿"];
-			const frames: string[] = [];
-			const makeFrame = (spot: number) => {
-				const cells: string[] = [];
-				for (let i = 0; i < W; i++) {
-					const dist = Math.abs(i - Math.round(spot * (W - 1)));
-					const b = dist <= 1 ? 6 : dist <= 3 ? 4 : dist <= 6 ? 2 : 0;
-					if (dist <= 2) cells.push((dist <= 1 ? RED_B : RED_M) + B[b] + RST);
-					else if (dist <= 5) cells.push(RED_D + B[b] + RST);
-					else cells.push(GRN_D + B[b] + RST);
-				}
-				return cells.join("");
-			};
-			const steps = 25;
-			for (let i = 0; i <= steps; i++) frames.push(makeFrame(i / steps));
-			for (let i = steps - 1; i >= 0; i--) frames.push(makeFrame(i / steps));
-			return frames;
-		};
-		ctx.ui.setWorkingMessage("");
-		ctx.ui.setWorkingIndicator({
-			frames: buildWorkingFrames(process.stdout.columns || 80),
-			intervalMs: 60,
-		});
-
 		// ── Widget as a Component (no animation timer) ──
 		// Scanner updates on user interaction and bake state changes only.
 		// No timer = zero render contention with overlays/settings.
@@ -225,13 +200,12 @@ export default function (pi: ExtensionAPI) {
 			return widget;
 		});
 
-		// ── State change handler (simplified — no widget re-set, central timer handles render) ──
+		// ── State change handler ──
 		bakeCtx.bake.onStateChange((s) => {
 			if (s.status === "done" || s.status === "failed" || s.status === "idle") {
-				ctx.ui.setWorkingIndicator();
 				ctx.ui.setStatus("bake", t.fg("dim", "⏎ bake ready"));
 			}
-			// Reset widget scanner timer on clean/idle transition (bake-reset)
+			// Reset widget scanner on clean/idle transition (bake-reset)
 			if (s.status === "idle") {
 				bakeCtx.widgetRef?.reset();
 			}

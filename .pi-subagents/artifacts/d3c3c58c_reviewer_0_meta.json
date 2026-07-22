@@ -1,0 +1,90 @@
+{
+  "runId": "d3c3c58c",
+  "agent": "reviewer",
+  "task": "Answer this question with evidence from the pi source code only.\n\n**Question:** What is pi's vanilla behavior for the working indicator (the \"⠋ Working...\" text that shows above the widget, below the pending messages area)? When does it show, when does it hide, and what frames/interval does it use?\n\nSpecifically:\n\n1. **When does the vanilla working indicator show?** During streaming? On commands? Does it stay visible after a command handler returns that does `bake.runPipeline().catch(...)` in the background?\n\n2. **When does it clear?** On stream_end? On session idle?\n\n3. **What frames and interval does it use by default?** (find DEFAULT_FRAMES and DEFAULT_INTERVAL_MS in pi-tui's loader.js)\n\n4. **Why does the vanilla working indicator NOT cause tmux scrollback issues** while the KITT scanner with 51 frames at 60ms DOES? Both use the same pi-tui `Loader` mechanism that calls `requestRender()` on every frame tick. If vanilla fires at 80ms with 10 frames and the KITT fires at 60ms with 51 frames, the difference is 12.5 vs 16.7 renders/second — not big enough to explain \"works fine\" vs \"unusable scroll hell.\"\n\n5. **Critically:** Is there any mechanism by which the vanilla working indicator avoids calling `requestRender()` on every tick? Or does the vanilla one also call it and the reason it \"works\" is that it only shows briefly during command processing (streaming = ~1-2 seconds)?\n\nRead these files for evidence:\n- /home/droid/.nvm/versions/node/v26.4.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js (search for WorkingStatusIndicator, isStreaming, stream_end, working_visible_change, clearStatusIndicator, showStatusIndicator, workingIndicatorOptions)\n- /home/droid/.nvm/versions/node/v26.4.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/status-indicator.js\n- /home/droid/.nvm/versions/node/v26.4.0/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/loader.js\n- /home/droid/.nvm/versions/node/v26.4.0/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/tui.js\n\nReturn a clear, evidence-backed answer. Start with the concise answer, then support it with source code references.",
+  "exitCode": 1,
+  "usage": {
+    "input": 28619,
+    "output": 962,
+    "cacheRead": 26880,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 4
+  },
+  "model": "opencode/deepseek-v4-flash-free:high",
+  "attemptedModels": [
+    "opencode/deepseek-v4-flash-free:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode/deepseek-v4-flash-free:high",
+      "success": false,
+      "exitCode": 1,
+      "error": "429: {\"type\":\"FreeUsageLimitError\",\"message\":\"Rate limit exceeded. Please try again later.\"}",
+      "usage": {
+        "input": 28619,
+        "output": 962,
+        "cacheRead": 26880,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 4
+      }
+    }
+  ],
+  "durationMs": 16920,
+  "toolCount": 8,
+  "error": "429: {\"type\":\"FreeUsageLimitError\",\"message\":\"Rate limit exceeded. Please try again later.\"}",
+  "acceptance": {
+    "status": "rejected",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [
+      {
+        "id": "attestation",
+        "status": "failed",
+        "message": "Structured acceptance report not found."
+      }
+    ],
+    "verifyRuns": [],
+    "childReportParseError": "Structured acceptance report not found."
+  },
+  "transcriptPath": "/home/droid/pi-bake/.pi-subagents/artifacts/d3c3c58c_reviewer_0_transcript.jsonl",
+  "timestamp": 1784646453797
+}

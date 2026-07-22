@@ -34,13 +34,8 @@ function taperChars(width: number): string[] {
 	return chars;
 }
 
-const GREEN_BRIGHT = "\x1b[38;5;119m";
-const GREEN_MID = "\x1b[38;5;108m";
-const GREEN_DIM = "\x1b[38;5;65m";
-const RESET = "\x1b[0m";
-
-/** Build a mirrored green taper with two spots sweeping center→out→center.
- *  All green — bright spots at the moving edges, dim in the middle. */
+/** Build a scanner taper with two spots sweeping center→out→center.
+ *  Uses theme colors — accent for the bright head, text for mid, muted for dim. */
 export function scannerTaper(
 	width: number,
 	scanSpread: number,
@@ -63,11 +58,10 @@ export function scannerTaper(
 					Math.abs(absIdx - rightScan),
 				);
 				if (minDist <= 5) {
-					const c =
-						minDist <= 1 ? GREEN_BRIGHT : minDist <= 3 ? GREEN_MID : GREEN_DIM;
-					return `${c}${ch}${RESET}`;
+					const v = minDist <= 1 ? "accent" : minDist <= 3 ? "text" : "muted";
+					return t.fg(v, ch);
 				}
-				return `${GREEN_DIM}${ch}${RESET}`;
+				return t.fg("muted", ch);
 			})
 			.join("");
 	};

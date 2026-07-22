@@ -1,13 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
+import { spawnAsync } from "../spawn-async.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-	Container,
-	Text,
-	Spacer,
 	wrapTextWithAnsi,
-	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { Overlay } from "../components/overlay.ts";
 import { bakeCtx, BAKE_BASE, PHASES_DIR, getPhaseList } from "./shared.ts";
@@ -61,20 +58,24 @@ function getWorkspaceInfo(): string[] {
 		lines.push("package.json: not found");
 	}
 
-	// ── npm latest version ──
+	// ── npm latest version (async, non-blocking) ──
 	try {
 		const pkgName = JSON.parse(
 			fs.readFileSync(path.join(BAKE_BASE, "package.json"), "utf-8"),
 		).name;
 		if (pkgName) {
-			const latest = execSync(`npm view ${pkgName} version 2>/dev/null`, {
-				encoding: "utf8",
+			spawnAsync("npm", ["view", pkgName, "version"], {
+				cwd: BAKE_BASE,
 				timeout: 3000,
-			}).trim();
-			lines.push(`npm latest: ${latest || "unpublished"}`);
+			}).then((result) => {
+				const latest = (result.stdout || "").trim();
+				if (latest) lines.push(`npm latest: ${latest}`);
+			}).catch(() => {
+				/* npm view failed — non-blocking, silently handled */
+			});
 		}
 	} catch {
-		/* npm view failed — not published or no network */
+		/* package.json not found */
 	}
 
 	return lines;
@@ -133,7 +134,7 @@ export function register(pi: ExtensionAPI): void {
 				return { icon: "○", color: "dim" as const };
 			};
 
-			/** Build the content body — all sections, each truncated to fit. */
+			/** Build the content body — all sections, as string array. No Component objects. */
 			const buildBody = (
 				theme: any,
 				idx: number,
@@ -143,21 +144,19 @@ export function register(pi: ExtensionAPI): void {
 				contentW = 50,
 				mode: "phases" | "events" | "spec" | "workspace" = "spec",
 				eventOff = 0,
-			) => {
-				const c = new Container();
+			): string[] => {
+				const lines: string[] = [];
 				const name = allPhases[idx];
 
 				// ── Workspace info (cached) ──
 				if (mode === "workspace") {
-					c.addChild(
-						new Text(theme.fg("accent", theme.bold("Workspace")), 1, 0),
-					);
+					lines.push(" " + theme.fg("accent", theme.bold("Workspace")));
 					const info = workspaceInfo;
 					const avail = Math.max(1, maxLines - 1);
 					for (const line of info.slice(scrollOff, scrollOff + avail)) {
 						const wrapped = wrapTextWithAnsi(line, contentW - 2);
 						for (const w of wrapped)
-							c.addChild(new Text(theme.fg("muted", `  ${w}`), 0, 0));
+							lines.push(theme.fg("muted", `  ${w}`));
 					}
 					if (info.length > avail) {
 						const pct = Math.round(
@@ -169,9 +168,9 @@ export function register(pi: ExtensionAPI): void {
 							"▓".repeat(Math.max(0, thumb)) +
 							"░" +
 							"▓".repeat(Math.max(0, barW - 2 - thumb));
-						c.addChild(new Text(theme.fg("dim", ` ▐${bar}▌`), 0, 0));
+						lines.push(theme.fg("dim", ` ▐${bar}▌`));
 					}
-					return c;
+					return lines;
 				}
 
 				// ── Phase list (always shown, capped to available lines) ──
@@ -195,15 +194,11 @@ export function register(pi: ExtensionAPI): void {
 							? theme.fg("accent", theme.bold(p))
 							: theme.fg(s.color, theme.bold(p))
 						: theme.fg(s.color, p);
-					c.addChild(new Text(`${marker} ${icon} ${label}`, 1, 0));
+					lines.push(" " + `${marker} ${icon} ${label}`);
 				}
 				if (allPhases.length > maxPhases)
-					c.addChild(
-						new Text(
-							theme.fg("dim", `  ··· ${allPhases.length - maxPhases} more`),
-							1,
-							0,
-						),
+					lines.push(
+						" " + theme.fg("dim", `  ··· ${allPhases.length - maxPhases} more`),
 					);
 
 				// ── Event log ──
@@ -213,14 +208,10 @@ export function register(pi: ExtensionAPI): void {
 					.reverse();
 
 				const inEvents = mode === "events";
-				c.addChild(
-					new Text(
-						inEvents
-							? theme.fg("accent", theme.bold("Event Log"))
-							: theme.fg("toolTitle", "Event Log"),
-						1,
-						0,
-					),
+				lines.push(
+					" " + (inEvents
+						? theme.fg("accent", theme.bold("Event Log"))
+						: theme.fg("toolTitle", "Event Log")),
 				);
 				if (phaseEvents.length > 0) {
 					const maxEv = Math.min(phaseEvents.length, Math.max(1, maxLines - 6));
@@ -248,16 +239,12 @@ export function register(pi: ExtensionAPI): void {
 							.replace("phase_", "")
 							.replace("pipeline_", "")
 							.slice(0, 18);
-						c.addChild(
-							new Text(
-								`  ${icon} ${theme.fg("dim", time)} ${theme.fg("muted", evShort)}`,
-								0,
-								0,
-							),
+						lines.push(
+							`  ${icon} ${theme.fg("dim", time)} ${theme.fg("muted", evShort)}`,
 						);
 					}
 				} else {
-					c.addChild(new Text(theme.fg("dim", "  no events"), 1, 0));
+					lines.push(" " + theme.fg("dim", "  no events"));
 				}
 
 				// ── Spec content ──
@@ -276,20 +263,16 @@ export function register(pi: ExtensionAPI): void {
 					}
 				}
 
-				c.addChild(new Spacer(1));
-				c.addChild(
-					new Text(
-						mode === "spec"
-							? theme.fg("accent", theme.bold("Spec"))
-							: theme.fg("toolTitle", "Spec"),
-						1,
-						0,
-					),
+				lines.push("");
+				lines.push(
+					" " + (mode === "spec"
+						? theme.fg("accent", theme.bold("Spec"))
+						: theme.fg("toolTitle", "Spec")),
 				);
 				const specAvail = Math.max(1, maxLines - 6);
 				const visible = contentLines.slice(scrollOff, scrollOff + specAvail);
 				for (const v of visible)
-					c.addChild(new Text(theme.fg("muted", v), 0, 0));
+					lines.push(theme.fg("muted", v));
 
 				if (contentLines.length > specAvail) {
 					const pct = Math.round(
@@ -301,19 +284,15 @@ export function register(pi: ExtensionAPI): void {
 						"▓".repeat(Math.max(0, thumb)) +
 						"░" +
 						"▓".repeat(Math.max(0, barW - 2 - thumb));
-					c.addChild(
-						new Text(
-							theme.fg(
-								"dim",
-								` ▐${bar}▌ ${scrollOff + 1}–${Math.min(scrollOff + specAvail, contentLines.length)}/${contentLines.length}`,
-							),
-							0,
-							0,
+					lines.push(
+						theme.fg(
+							"dim",
+							` ▐${bar}▌ ${scrollOff + 1}–${Math.min(scrollOff + specAvail, contentLines.length)}/${contentLines.length}`,
 						),
 					);
 				}
 
-				return c;
+				return lines;
 			};
 
 			// ── State ──
@@ -342,52 +321,44 @@ export function register(pi: ExtensionAPI): void {
 					(tui, theme, _kb, done) => {
 						if (selectedIdx >= allPhases.length) selectedIdx = 0;
 
-						let ov: Overlay | null = null;
+						const rows = tui.terminal.rows || 24;
+						const cols = tui.terminal.columns || 80;
+						const maxSpec = Math.max(3, rows - 6);
+						const specW = Math.max(12, cols - 6);
 
-						const makeOv = (sc: number) => {
-							if (ov) ov.dispose();
-							const rows = tui.terminal.rows || 24;
-							const cols = tui.terminal.columns || 80;
-							const o = new Overlay(theme, {
-								title: allPhases[selectedIdx],
-								maxHeight: Math.max(4, rows - 1),
-							});
-							const maxSpec = Math.max(3, rows - 6);
-							const specW = Math.max(12, cols - 6);
-							o.addBody(
-								buildBody(
-									theme,
-									selectedIdx,
-									bake!.stateSnapshot,
-									sc,
-									maxSpec,
-									specW,
-									mode,
-									eventScroll,
-								),
-							);
+						// Single overlay — never recreated, so animStart doesn't reset
+						const ov = new Overlay(theme, {
+							title: "Phase Detail",
+							maxHeight: Math.max(4, rows - 1),
+						});
 
-							const modeTag =
-								mode === "phases"
-									? theme.fg("accent", "PHS")
-									: mode === "events"
-										? theme.fg("accent", "EVT")
-										: mode === "workspace"
-											? theme.fg("accent", "WRK")
-											: "spc";
-							// Footer adapts to terminal width
-							const legend =
-								cols >= 48
-									? `v:cyc j:dn k:up n/p:ph r:rt s:sk q:q`
-									: `v j k n p r s q`;
-							o.addFooter(`${modeTag} ${legend}`);
-							return o;
+						// Body component reads mutable state on each render
+						const bodyComponent = {
+							render: (_w: number): string[] => {
+								return buildBody(
+									theme, selectedIdx, bake!.stateSnapshot,
+									scrollOffset, maxSpec, specW, mode, eventScroll,
+								);
+							},
+							invalidate: () => {},
 						};
+						ov.addBody(bodyComponent);
 
-						ov = makeOv(scrollOffset);
+						const modeTag = () =>
+							mode === "phases"
+								? theme.fg("accent", "PHS")
+								: mode === "events"
+									? theme.fg("accent", "EVT")
+									: mode === "workspace"
+										? theme.fg("accent", "WRK")
+										: "spc";
+						const legend =
+							cols >= 48
+								? `v:cyc j:dn k:up n/p:ph r:rt s:sk q:q`
+								: `v j k n p r s q`;
+						ov.addFooter(`${modeTag()} ${legend}`);
 
 						const rebuild = () => {
-							ov = makeOv(scrollOffset);
 							tui.requestRender();
 						};
 

@@ -37,7 +37,7 @@ export class EventLog {
 	}
 
 	/**
-	 * Read the last N events (newest first).
+	 * Read the last N events in chronological order (oldest first).
 	 *
 	 * When the write stream is active, reads the on-disk log file directly.
 	 * The OS page cache typically provides sub-ms reads, so no explicit
@@ -58,25 +58,6 @@ export class EventLog {
 			}
 		}
 		return result;
-	}
-
-	/** Read all events matching a type. */
-	filter(type: string): BakeEvent[] {
-		if (!fs.existsSync(this.logPath)) return [];
-		const content = fs.readFileSync(this.logPath, "utf-8");
-		return content
-			.trim()
-			.split("\n")
-			.filter(Boolean)
-			.map((line) => {
-				try {
-					return JSON.parse(line) as BakeEvent;
-				} catch {
-					return null;
-				}
-			})
-			.filter((e): e is BakeEvent => e !== null)
-			.filter((e) => e.type === type);
 	}
 
 	/** Start streaming (write stream for performance during active runs). */

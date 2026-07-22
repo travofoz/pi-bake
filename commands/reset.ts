@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container, Text, Spacer } from "@earendil-works/pi-tui";
 import { Overlay } from "../components/overlay.ts";
@@ -59,6 +60,15 @@ export function register(pi: ExtensionAPI): void {
 			if (!confirmed) {
 				cmdCtx.ui.notify(t.fg("dim", "Reset cancelled"), "info");
 				return;
+			}
+
+			// Create a git tag backup before destructive cleanup
+			try {
+				const ts = Date.now();
+				execSync(`git tag bake-reset-${ts}`, { cwd: process.cwd(), timeout: 5000 });
+				cmdCtx.ui.notify(t.fg("dim", `Git tag: bake-reset-${ts}`), "info");
+			} catch {
+				/* non-fatal: git backup tag is a convenience, not required */
 			}
 
 			bake.clean();

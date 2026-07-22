@@ -32,8 +32,8 @@ export interface ExecutorResult {
 
 /**
  * Parse the last 500 chars of executor output for STATUS: <code>.
- * Falls back to DONE if no explicit status found (output >= 50 chars)
- * or BLOCKED if output is suspiciously short/empty.
+ * Returns BLOCKED if no explicit status found — fails loud so LLM
+ * format drift is visible, never silently passes.
  */
 function parseStatus(output: string): ExecutorResult {
 	const tail = output.slice(-500);
@@ -64,9 +64,9 @@ function parseStatus(output: string): ExecutorResult {
 		return { status, output, concerns, blockReason };
 	}
 
-	// No explicit status — infer from output length
+	// No explicit status — fail loud so LLM format drift is visible
 	if (output.length >= 50) {
-		return { status: "DONE", output };
+		return { status: "BLOCKED", output, blockReason: "No STATUS: line found in executor output (≥50 chars with no explicit status code)" };
 	}
 	return { status: "BLOCKED", output, blockReason: "No status reported and output too short" };
 }

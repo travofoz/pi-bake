@@ -237,9 +237,6 @@ function phaseMachine(env: BakeEnv) {
 					],
 					onError: {
 						target: "remediating",
-						actions: ({ context }) => {
-							context.attempt++;
-						},
 					},
 				},
 			},

@@ -28,10 +28,14 @@ export interface AuditResult {
  * @param enabledRules - optional set of rule filenames to run; all run if omitted
  * Returns findings for any violations.
  */
+/**
+ * @param onInfraWarning - optional callback for infrastructure warnings (sg missing, etc.)
+ */
 export async function runStructuralAudit(
 	workspacePath: string,
 	rulesDir: string,
 	enabledRules?: Set<string>,
+	onInfraWarning?: (msg: string) => void,
 ): Promise<AuditFinding[]> {
 	const baseDir = path.join(rulesDir, "base");
 	if (!fs.existsSync(baseDir)) return [];
@@ -72,6 +76,9 @@ export async function runStructuralAudit(
 			// Spawn failed (command not found, permission denied, timeout).
 			// This is an infrastructure issue, not a code finding — skip the rule
 			// and continue. The rule produces no findings when sg can't run.
+			onInfraWarning?.(
+				`sg scan failed for ${ruleFile} — is ast-grep installed?`,
+			);
 		}
 	}
 
@@ -88,10 +95,10 @@ export function buildSemanticAuditPrompt(workspacePath: string): string {
 Output exactly one PASS or FAIL per line (8 lines), then RESULT: PASS or RESULT: ISSUES, then a JSON block with a "failures" array.
 
 CHECKS:
-1. All async $effect calls guard state mutations with a destroyed flag (set in onDestroy, checked after each await)
-2. Files using $effect with async work import onDestroy from 'svelte'
-3. Upload success message is stored before clearUpload() call (not after)
-4. Blob URL for download uses deferred revocation (setTimeout, not synchronous after a.click())
+1. Async operations check for component/object lifecycle state before mutating after await
+2. Event listeners and subscriptions are cleaned up in destructor/dispose/onDestroy patterns
+3. Error messages in catch blocks include context (not just re-thrown or swallowed without info)
+4. Temporary URLs, file handles, or resources are properly released/revoked after use (deferred cleanup, not synchronous)
 5. No placeholder/stub implementations (TODO, FIXME, pass, return null)
 6. Error paths in async functions show meaningful error messages (not just re-thrown or swallowed)
 7. No hardcoded secrets, tokens, or API keys in source

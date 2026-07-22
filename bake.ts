@@ -12,7 +12,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { EventLog } from "./event-log.ts";
 import { RpcAgent } from "./rpc-agent.ts";
-import type { AuditFinding } from "./auditor.ts";
 import {
 	startBakePipeline,
 	type BakeEnv,
@@ -60,6 +59,7 @@ export class Bake {
 	private rpcAgent: RpcAgent;
 
 	/** Reference to the running BakeMachine actor (null when idle). */
+	/** Reference to the running BakeMachine actor (null when idle). */
 	private bakeActor: BakeMachineActor | null = null;
 
 	/**
@@ -67,6 +67,9 @@ export class Bake {
 	 * Used by provideContext() to target the right child.
 	 */
 	private waitingPhaseId: string | null = null;
+
+	/** Cache of PhaseSpecs during active pipeline (avoids re-reading disk on every state sync). */
+	private cachedPhases: PhaseSpec[] = [];
 
 	constructor(baseDir: string, workspaceDir: string, rulesDir: string) {
 		this.bakeDir = path.join(baseDir, ".bake");
@@ -347,6 +350,8 @@ export class Bake {
 		this.state.status = "paused";
 		this.emitState();
 		this.bakeActor?.send({ type: "ABORT" });
+		this.bakeActor?.stop();
+		this.bakeActor = null;
 		this.log.append("pause", {});
 	}
 
@@ -443,7 +448,9 @@ export class Bake {
 	 * The actor subscribes to snapshot changes to update BakeState for UI.
 	 */
 	async runPipeline(): Promise<void> {
-		this.state.status = "running";
+		// Preserve paused flag across pipeline restart so ABORT→failed is remapped
+		const wasPaused = this.state.status === "paused";
+		if (!wasPaused) this.state.status = "running";
 		this.emitState();
 
 		// Start the RPC agent (idempotent)
@@ -473,6 +480,8 @@ export class Bake {
 			log: this.log,
 		};
 
+		this.cachedPhases = phases;
+
 		try {
 			const { actor, done } = startBakePipeline(
 				phases,
@@ -501,21 +510,26 @@ export class Bake {
 					this.state.completedPhases.push(phase.name);
 				}
 			}
-			this.state.status = this.state.status === "paused"
+			this.state.status = wasPaused
 				? "paused"
 				: output.passed
-				? "done"
-				: "failed";
+					? "done"
+					: "failed";
 			this.log.append(
 				output.passed ? "pipeline_complete" : "pipeline_halted",
 				{},
 			);
+		} catch (err) {
+			this.state.status = "failed";
+			this.log.append("pipeline_crash", { error: String(err) });
 		} finally {
 			this.bakeActor = null;
 			this.emitState();
 			this.log.close();
 			this.rpcAgent.close();
 		}
+
+		this.cachedPhases = [];
 	}
 
 	/**
@@ -529,9 +543,8 @@ export class Bake {
 	}): void {
 		const ctx = snapshot.context;
 
-		// Build a lookup from phaseId → PhaseSpec (available from the last loaded phases)
-		// We rebuild this each time; in practice it's a tiny array.
-		const phases = this.getPendingPhases();
+		// Use cached phase list (set at pipeline start) to avoid re-reading disk
+		const phases = this.cachedPhases.length > 0 ? this.cachedPhases : this.getPendingPhases();
 		const idToSpec = new Map(phases.map((p) => [p.phaseId, p]));
 
 		this.state.completedPhases = Object.entries(ctx.completed)
@@ -566,6 +579,8 @@ export class Bake {
 					: "running";
 		}
 
+		// Persist state.json so crash recovery has latest state
+		this.saveState();
 		this._onStateChange?.(this.state);
 	}
 
@@ -585,17 +600,20 @@ export class Bake {
 
 		let previewBuf = "";
 		let lastStatusUpdate = 0;
-		const output = await this.rpcAgent.prompt(prompt, (delta) => {
-			previewBuf += delta;
-			const now = Date.now();
-			if (now - lastStatusUpdate > 300) {
-				lastStatusUpdate = now;
-				const preview = previewBuf.trimEnd().slice(-80).replace(/\n/g, " ");
-				this._onStatus?.(`${label}  ➜ ${preview}`);
-			}
-		});
-
-		return output;
+		try {
+			const output = await this.rpcAgent.prompt(prompt, (delta) => {
+				previewBuf += delta;
+				const now = Date.now();
+				if (now - lastStatusUpdate > 300) {
+					lastStatusUpdate = now;
+					const preview = previewBuf.trimEnd().slice(-80).replace(/\n/g, " ");
+					this._onStatus?.(`${label}  ➜ ${preview}`);
+				}
+			});
+			return output;
+		} finally {
+			this.rpcAgent.close();
+		}
 	}
 
 	/** Show/hide the loader indicator with a status message. */
