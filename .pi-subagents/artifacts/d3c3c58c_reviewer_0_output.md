@@ -1,1 +1,0 @@
-Now let me look at session events and the `isStreaming` property, and also search for `workingIndicatorOptions` and `workingVisible` initialization:

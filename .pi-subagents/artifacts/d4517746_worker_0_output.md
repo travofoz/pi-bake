@@ -1,1 +1,0 @@
-Both fixes verified. Here's the acceptance report:

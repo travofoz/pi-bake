@@ -11,3 +11,4 @@ node_modules/
 .bake/config.json
 scripts/pi-config-export/
 scripts/pi-config-export.tar.gz
+.pi-subagents/
